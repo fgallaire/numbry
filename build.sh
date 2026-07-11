@@ -42,6 +42,10 @@ pin() {  # url dir ref
     git -C "$dir" checkout -q FETCH_HEAD
 }
 NP="$W/numpy-src";  pin https://github.com/numpy/numpy.git   "$NP" "$NUMPY_TAG"
+# numpy vendors two build-time submodules the sdist embeds but a tag clone
+# does not: the pythoncapi-compat header and the highway SIMD tree.
+git -C "$NP" submodule update --init --depth 1 \
+    numpy/_core/src/common/pythoncapi-compat numpy/_core/src/highway
 PD="$W/pandas-src"; pin https://github.com/pandas-dev/pandas "$PD" "$PANDAS_TAG"
 SC="$W/scipy-src";  pin https://github.com/scipy/scipy.git   "$SC" "$SCIPY_TAG"
 CY="$W/cython-src"; pin https://github.com/fgallaire/cython.git "$CY" "$CYTHON_COMMIT"
