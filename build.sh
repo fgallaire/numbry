@@ -16,7 +16,7 @@ EMSCRIPTEN_VERSION="${EMSCRIPTEN_VERSION:-5.0.7}"
 NUMPY_TAG="v2.5.1"
 PANDAS_TAG="v2.2.3"
 SCIPY_TAG="v1.14.1"
-CYTHON_COMMIT="1fcb9f4c0cb0e88979e2fb1e332015b406b0b360"   # Cython 3.3 master, 3.14 C-API output
+CYTHON_COMMIT="1fcb9f4c0cb0a67148f5bb4551cf10571cb7b569"   # fgallaire/cython fix-argsslice-fastcall (3.3 master + ArgsSlice fix)
 
 W="$HERE/.wasthon"
 
@@ -41,7 +41,7 @@ pin() {  # url dir ref
 NP="$W/numpy-src";  pin https://github.com/numpy/numpy.git   "$NP" "$NUMPY_TAG"
 PD="$W/pandas-src"; pin https://github.com/pandas-dev/pandas "$PD" "$PANDAS_TAG"
 SC="$W/scipy-src";  pin https://github.com/scipy/scipy.git   "$SC" "$SCIPY_TAG"
-CY="$W/cython-src"; pin https://github.com/cython/cython.git "$CY" "$CYTHON_COMMIT"
+CY="$W/cython-src"; pin https://github.com/fgallaire/cython.git "$CY" "$CYTHON_COMMIT"
 export CYTHON_PYTHONPATH="$CY"
 
 echo "=== pure-python runtime deps for the pandas VFS (dateutil/pytz/six) ==="
