@@ -27,6 +27,9 @@ git clone --depth 1 -b "$WASTHON_REF" "$WASTHON_REPO" "$W"
 echo "=== install emsdk ${EMSCRIPTEN_VERSION} (the recipes source external/emsdk) ==="
 git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$W/external/emsdk"
 ( cd "$W/external/emsdk" && ./emsdk install "$EMSCRIPTEN_VERSION" && ./emsdk activate "$EMSCRIPTEN_VERSION" )
+# put emcc on PATH for every recipe below (emsdk_env may chdir: restore it)
+source "$W/external/emsdk/emsdk_env.sh" >/dev/null 2>&1
+cd "$HERE"
 
 # Pin an external source tree to an exact commit/tag (fetch-by-ref).
 pin() {  # url dir ref

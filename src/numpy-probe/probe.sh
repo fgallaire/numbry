@@ -14,7 +14,7 @@ mkdir -p "$GEN" "$OBJ"
 cp "$HERE"/config.h "$HERE"/_numpyconfig.h "$HERE"/npy_cpu_dispatch_config.h "$GEN"/
 
 # 0. numpy-side recipe patches (3 files / 5 direct ->ob_type sites)
-( cd "$NP" && patch -p1 -N < "$HERE/recipe-patches.diff" ) || true
+( cd "$NP" && patch -p0 -N -t < "$HERE/recipe-patches.diff" ) || true
 
 # 1. numpy's standalone generators (note the -o semantics: the api
 #    generators take a DIRECTORY, the umath ones take a FILE path)
