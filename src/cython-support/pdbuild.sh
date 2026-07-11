@@ -38,7 +38,13 @@ cd "$ROOT" && source external/emsdk/emsdk_env.sh >/dev/null 2>&1
 
 PP="-DCYTHON_USE_TYPE_SPECS=1 -DCYTHON_USE_MODULE_STATE=0 -DCYTHON_FAST_THREAD_STATE=0 -DCYTHON_USE_EXC_INFO_STACK=0 -DCYTHON_USE_TYPE_SLOTS=0 -DCYTHON_USE_PYTYPE_LOOKUP=0 -DCYTHON_USE_UNICODE_INTERNALS=0 -DCYTHON_USE_PYLONG_INTERNALS=0 -DCYTHON_USE_PYLIST_INTERNALS=0 -DCYTHON_ASSUME_SAFE_MACROS=0 -DCYTHON_UNPACK_METHODS=0 -DCYTHON_AVOID_BORROWED_REFS=1 -DPy_OptimizeFlag=0"
 PDINC="-I $SRC -I $CS -I $ROOT/numpy-probe/gen -I $ROOT/numpy-probe -I $NP/numpy/_core/include -I $NP/numpy/_core/include/numpy -I $NP/numpy/_core/src/common -I $PD/pandas/_libs/include -I $PD/pandas/_libs"
-CFLAGS="-O1 -c -DNDEBUG -DPy_PYTHON_H -DNPY_NO_DEPRECATED_API=0 $PP -Wno-macro-redefined -Wno-int-conversion -Wno-incompatible-pointer-types -include $SRC/patchlevel.h -include $CS/cython_compat.h $PDINC"
+CFLAGS="-O1 -c -DNDEBUG -DPy_PYTHON_H -DNPY_NO_DEPRECATED_API=0 -DCYTHON_VECTORCALL_TPNEW=0 $PP -Wno-macro-redefined -Wno-int-conversion -Wno-incompatible-pointer-types -include $SRC/patchlevel.h -include $CS/cython_compat.h -include $CS/scipy_compat.h $PDINC"
+
+# generate the .pxi helpers from their tempita templates (a git-tag tree only
+# has the .pxi.in; the Tempita engine ships inside the pinned Cython).
+for T in "$PD"/pandas/_libs/*.pxi.in; do
+  [ -f "${T%.in}" ] || PYTHONPATH="${CYTHON_PYTHONPATH:-}" python3 "$PD/generate_pxi.py" "$T" -o "$PD/pandas/_libs"
+done
 
 # import-required Cython modules, in import-dependency order.
 # tslibs first (pandas._libs.__init__ pulls interval+tslibs), then the core lot.
