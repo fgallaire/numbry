@@ -16,7 +16,8 @@ EMSCRIPTEN_VERSION="${EMSCRIPTEN_VERSION:-5.0.7}"
 NUMPY_TAG="v2.5.1"
 PANDAS_TAG="v2.2.3"
 SCIPY_TAG="v1.14.1"
-CYTHON_COMMIT="1fcb9f4c0cb0a67148f5bb4551cf10571cb7b569"   # fgallaire/cython fix-argsslice-fastcall (3.3 master + ArgsSlice fix)
+CYTHON_COMMIT="1fcb9f4c0cb0a67148f5bb4551cf10571cb7b569"   # fgallaire/cython fix-argsslice-fastcall (3.3 master + ArgsSlice fix) — scipy
+CYTHON30_TAG="3.0.11"   # upstream — numpy.random + pandas were validated against 3.0.11 output (3.3 crashes on pandas' fused types)
 
 W="$HERE/.wasthon"
 
@@ -48,8 +49,8 @@ git -C "$NP" submodule update --init --depth 1 \
     numpy/_core/src/common/pythoncapi-compat numpy/_core/src/highway
 PD="$W/pandas-src"; pin https://github.com/pandas-dev/pandas "$PD" "$PANDAS_TAG"
 SC="$W/scipy-src";  pin https://github.com/scipy/scipy.git   "$SC" "$SCIPY_TAG"
-CY="$W/cython-src"; pin https://github.com/fgallaire/cython.git "$CY" "$CYTHON_COMMIT"
-export CYTHON_PYTHONPATH="$CY"
+CY="$W/cython-src";   pin https://github.com/fgallaire/cython.git "$CY" "$CYTHON_COMMIT"
+CY30="$W/cython30-src"; pin https://github.com/cython/cython.git "$CY30" "$CYTHON30_TAG"
 
 echo "=== pure-python runtime deps for the pandas VFS (dateutil/pytz/six) ==="
 DEPS="$W/pdeps"
@@ -71,7 +72,7 @@ bash "$W/numpy-probe/probe.sh" "$NP"
 echo "=== numpy.linalg (f2c'd lapack_lite, pure C) ==="
 bash "$W/numpy-probe/linalg.sh" "$NP"
 echo "=== numpy.random (9 Cython modules) -> build/nprnd.mjs ==="
-bash "$W/cython-support/nprnd.sh" "$NP"
+CYTHON_PYTHONPATH="$CY30" bash "$W/cython-support/nprnd.sh" "$NP"
 
 echo "=== relink the two dashboard modules WITH linalg ==="
 ( cd "$W" && source external/emsdk/emsdk_env.sh >/dev/null 2>&1
@@ -93,9 +94,9 @@ echo "=== relink the two dashboard modules WITH linalg ==="
     -o "$W/build/nprnd.mjs" )
 
 echo "=== pandas._libs (43 extensions) -> build/nppd.mjs ==="
-bash "$W/cython-support/pdbuild.sh" "$PD" "$NP"
+CYTHON_PYTHONPATH="$CY30" bash "$W/cython-support/pdbuild.sh" "$PD" "$NP"
 echo "=== scipy.ndimage -> build/npnd.mjs ==="
-bash "$W/cython-support/ndbuild.sh" "$SC" "$NP"
+CYTHON_PYTHONPATH="$CY" bash "$W/cython-support/ndbuild.sh" "$SC" "$NP"
 
 echo "=== VFS blobs (numpy / pandas+tests / scipy+tests) ==="
 node "$W/numpy-probe/gen_numpy_vfs.mjs" "$NP/numpy" "$W/build/numpy_vfs.js"
