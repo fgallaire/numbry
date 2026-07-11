@@ -52,6 +52,10 @@ for (const m of ['mmap', 'ctypes']) {
   scripts[m] = ['.py', fs.readFileSync(path.join(HERE, 'pandas-stubs', m + '.py'), 'utf8'), [], false];
   n++;
 }
+// meson-generated version module (absent from a git-tag tree; the versioneer
+// fallback shells out to git -> posix.pipe, unavailable in the browser)
+scripts['pandas._version_meson'] = ['.py', fs.readFileSync(path.join(HERE, 'pandas-stubs', '_version_meson.py'), 'utf8'), [], false];
+n++;
 // hypothesis stub (package + the two extra.* submodules
 // pandas._testing._hypothesis imports): @given tests -> skips.
 scripts['hypothesis'] = ['.py', fs.readFileSync(path.join(HERE, 'pandas-stubs', 'hypothesis.py'), 'utf8'), [], true];
