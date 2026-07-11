@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Wasthon — pandas test module</title>
+<script src="./brython/brython.js"></script>
+<script src="./brython/brython_stdlib.js"></script>
+<!-- numpy's Python layer + LAPACK stub + pytest shim, as a Brython VFS -->
+<script src="../build/numpy_vfs.js"></script>
+<!-- pandas' Python layer + six/dateutil/pytz + the mmap/ctypes stubs -->
+<script src="../build/pandas_vfs.js"></script>
+<!-- dateutil's embedded zoneinfo tarball (binary, can't live in the VFS);
+     served through a pkgutil.get_data patch in the smoke prologue -->
+<script src="../build/dateutil_zoneinfo_data.js"></script>
+</head>
+<body>
+<p style="font-size:0.85em;margin:0 0 1em 0;"><a href="index.html">← back to index</a></p>
+<h1>Wasthon — pandas test module</h1>
+<p style="color:#666;font-size:0.9em;max-width:70ch;">
+  Imports <b>pandas 2.2.3</b> — the real thing: 43 <code>pandas._libs</code>
+  C/Cython extension modules compiled to wasm (plus numpy's C core and
+  numpy.random) — and runs a basic functional checklist.
+</p>
+<pre id="log" style="background:#f4f4f4;padding:1em;font-size:13px;line-height:1.4;"></pre>
+
+<script type="text/x-pandas-runner" id="runner">
+import pytest as _pt
+
+def _expand_params(params):
+    if not params:
+        return [{}]
+    result = [{}]
+    for argnames, argvalues in reversed(params):
+        names = [n.strip() for n in (argnames.split(",") if isinstance(argnames, str) else argnames)]
+        factor = []
+        for v in argvalues:
+            val = v.values if type(v).__name__ == "_Param" else v
+            if len(names) == 1:
+                factor.append({names[0]: val})
+            else:
+                seq = val if isinstance(val, (tuple, list)) else (val,)
+                factor.append(dict(zip(names, seq)))
+        new = []
+        for base in result:
+            for f in factor:
+                d = dict(base); d.update(f); new.append(d)
+        result = new
+    return result
+
+def _expand(func):
+    return _expand_params(getattr(func, "_pytest_params", None))
+
+class _Request:
+    def __init__(self, mod, param=None):
+        self._mod = mod
+        self.param = param
+    def getfixturevalue(self, name):
+        return _call_fixture(self._mod, name, None)
+
+def _call_fixture(mod, name, param):
+    fn = getattr(mod, name, None)
+    if fn is None or not callable(fn):
+        raise AttributeError("fixture " + name + " not found in module")
+    args = ()
+    code = getattr(fn, "__code__", None)
+    if code is not None and code.co_argcount and code.co_varnames[0] == "request":
+        args = (_Request(mod, param),)
+    res = fn(*args)
+    if hasattr(res, "__next__"):
+        res = next(res)
+    return res
+
+def _fixture_cases(func, mod, cases):
+    code = getattr(func, "__code__", None)
+    if code is None or mod is None:
+        return cases
+    names = [n for n in code.co_varnames[:code.co_argcount] if n != "self"]
+    for name in names:
+        if all(name in c for c in cases):
+            continue
+        if name == "request":
+            for c in cases:
+                c.setdefault("request", _Request(mod))
+            continue
+        fn = getattr(mod, name, None)
+        if fn is None or not getattr(fn, "_pytest_fixture", False):
+            continue
+        params = getattr(fn, "_pytest_fixture_params", None)
+        if params:
+            new = []
+            for c in cases:
+                for p in params:
+                    d = dict(c); d[name] = _call_fixture(mod, name, p); new.append(d)
+            cases = new
+        else:
+            for c in cases:
+                c[name] = _call_fixture(mod, name, None)
+    return cases
+
+def _run_one(func, label, out, mod=None, base=None):
+    if getattr(func, "_pytest_skip", False):
+        out[2] += 1; return
+    try:
+        cases = _expand(func)
+        if base:
+            merged = []
+            for b in base:
+                for c in cases:
+                    d = dict(b); d.update(c); merged.append(d)
+            cases = merged
+        cases = _fixture_cases(func, mod, cases)
+    except Exception:
+        cases = [{}]
+    for kwargs in cases:
+        try:
+            func(**kwargs)
+            out[0] += 1
+        except _pt.Skipped:
+            out[2] += 1
+        except _pt.XFailed:
+            out[2] += 1
+        except BaseException as e:
+            if getattr(func, "_pytest_xfail", False):
+                out[2] += 1; continue
+            out[1] += 1
+            out[3].append(label + ": " + type(e).__name__ + ": " + str(e)[:80])
+
+def run_module(mod):
+    out = [0, 0, 0, []]   # passed, failed, skipped, failmsgs
+    names = dir(mod)
+    for name in names:
+        if not name.startswith("test_"):
+            continue
+        obj = getattr(mod, name, None)
+        if callable(obj) and not isinstance(obj, type):
+            _run_one(obj, name, out, mod)
+    for name in names:
+        cls = getattr(mod, name, None)
+        if isinstance(cls, type) and name.startswith("Test"):
+            if getattr(cls, "_pytest_skip", False):
+                continue
+            sc_exc = None
+            sc = getattr(cls, "setup_class", None)
+            if sc:
+                try: sc()
+                except _pt.Skipped: sc_exc = "skip"
+                except BaseException as e:
+                    sc_exc = "setup_class " + type(e).__name__ + ": " + str(e)[:60]
+            for mname in dir(cls):
+                if not mname.startswith("test_"):
+                    continue
+                if not callable(getattr(cls, mname, None)):
+                    continue
+                if sc_exc == "skip":
+                    out[2] += 1; continue
+                if sc_exc:
+                    out[1] += 1; out[3].append(name + "." + mname + ": " + sc_exc); continue
+                try:
+                    inst = cls()
+                except BaseException as e:
+                    out[1] += 1; out[3].append(name + "." + mname + ": ctor " + type(e).__name__); continue
+                for setup in ("setup_method", "setup"):
+                    su = getattr(inst, setup, None)
+                    if su:
+                        try: su()
+                        except TypeError:
+                            try: su(getattr(inst, mname))
+                            except Exception: pass
+                        except Exception: pass
+                        break
+                _run_one(getattr(inst, mname), name + "." + mname, out, mod,
+                         _expand_params(getattr(cls, "_pytest_params", None)))
+    return out
+</script>
+
+<script type="module">
+const logEl = document.getElementById('log');
+const log = (s) => { logEl.textContent += s + '\n'; };
+
+const params = new URLSearchParams(location.search);
+const TEST = params.get('test') || 'pandas.tests.tslibs.test_ccalendar';
+
+const $B = window.__BRYTHON__;
+globalThis.$B = $B;
+globalThis.__BRYTHON__ = $B;
+globalThis._b_ = $B.builtins;
+
+// C extension modules living in the combined wasm -> their PyInit export.
+const RAND_C = {
+  'numpy.random._common':            '_PyInit__common',
+  'numpy.random.bit_generator':      '_PyInit_bit_generator',
+  'numpy.random._mt19937':           '_PyInit__mt19937',
+  'numpy.random._philox':            '_PyInit__philox',
+  'numpy.random._pcg64':             '_PyInit__pcg64',
+  'numpy.random._sfc64':             '_PyInit__sfc64',
+  'numpy.random._bounded_integers':  '_PyInit__bounded_integers',
+  'numpy.random._generator':         '_PyInit__generator',
+  'numpy.random.mtrand':             '_PyInit_mtrand',
+};
+const PD_C = {
+  'pandas._libs.tslibs.base': '_PyInit_base',
+  'pandas._libs.tslibs.ccalendar': '_PyInit_ccalendar',
+  'pandas._libs.tslibs.np_datetime': '_PyInit_np_datetime',
+  'pandas._libs.tslibs.dtypes': '_PyInit_dtypes',
+  'pandas._libs.tslibs.timezones': '_PyInit_timezones',
+  'pandas._libs.tslibs.nattype': '_PyInit_nattype',
+  'pandas._libs.tslibs.conversion': '_PyInit_conversion',
+  'pandas._libs.tslibs.timedeltas': '_PyInit_timedeltas',
+  'pandas._libs.tslibs.tzconversion': '_PyInit_tzconversion',
+  'pandas._libs.tslibs.timestamps': '_PyInit_timestamps',
+  'pandas._libs.tslibs.fields': '_PyInit_fields',
+  'pandas._libs.tslibs.offsets': '_PyInit_offsets',
+  'pandas._libs.tslibs.parsing': '_PyInit_parsing',
+  'pandas._libs.tslibs.period': '_PyInit_period',
+  'pandas._libs.tslibs.strptime': '_PyInit_strptime',
+  'pandas._libs.tslibs.vectorized': '_PyInit_vectorized',
+  'pandas._libs.interval': '_PyInit_interval',
+  'pandas._libs.hashtable': '_PyInit_hashtable',
+  'pandas._libs.missing': '_PyInit_missing',
+  'pandas._libs.lib': '_PyInit_lib',
+  'pandas._libs.tslib': '_PyInit_tslib',
+  'pandas._libs.algos': '_PyInit_algos',
+  'pandas._libs.arrays': '_PyInit_arrays',
+  'pandas._libs.groupby': '_PyInit_groupby',
+  'pandas._libs.hashing': '_PyInit_hashing',
+  'pandas._libs.index': '_PyInit_index',
+  'pandas._libs.indexing': '_PyInit_indexing',
+  'pandas._libs.internals': '_PyInit_internals',
+  'pandas._libs.join': '_PyInit_join',
+  'pandas._libs.ops': '_PyInit_ops',
+  'pandas._libs.ops_dispatch': '_PyInit_ops_dispatch',
+  'pandas._libs.properties': '_PyInit_properties',
+  'pandas._libs.reshape': '_PyInit_reshape',
+  'pandas._libs.sparse': '_PyInit_sparse',
+  'pandas._libs.writers': '_PyInit_writers',
+  'pandas._libs.pandas_datetime': '_PyInit_pandas_datetime',
+  'pandas._libs.pandas_parser': '_PyInit_pandas_parser',
+  'pandas._libs.window.indexers': '_PyInit_indexers',
+  'pandas._libs.window.aggregations': '_PyInit_aggregations',
+  'pandas._libs.testing': '_PyInit_testing',
+  'pandas._libs.parsers': '_PyInit_parsers',
+  'pandas._libs.json': '_PyInit_json'
+};
+
+try {
+  log('loading combined numpy + numpy.random + pandas._libs wasm…');
+  const factory = (await import('../build/nppd.mjs')).default;
+  const M = await factory();
+  M._wasthon_init();
+
+  function runMA() {
+    const name = 'numpy._core._multiarray_umath';
+    if ($B.imported[name] !== undefined) return;
+    const def = M._PyInit__multiarray_umath();
+    const cmod = M._wasthon_module_create(def);
+    if (cmod !== 0) {
+      $B.imported[name] = M.wasthon.handles.get(cmod);
+      try { $B.str_dict_set($B.get_dict($B.imported['numpy._core']), '_multiarray_umath', $B.imported[name]); } catch(e){}
+    }
+  }
+
+  // create a C extension module from its PyInit export. The Python parents
+  // come from the VFS through the ordinary Brython import; multi-phase defs
+  // get their full dotted name (relative imports inside Py_mod_exec),
+  // single-phase inits (ujson) return the finished module directly.
+  const orig = $B.$__import__;
+  function runC(fullname, pyinit) {
+    if ($B.imported[fullname] !== undefined) return true;
+    const parts = fullname.split('.');
+    const parent = parts.slice(0, -1).join('.');
+    if (parent && $B.imported[parent] === undefined) {
+      try { orig(parent, {}, {}, [], 0); } catch(e){}
+    }
+    if ($B.imported[fullname] !== undefined) return true;  // parent exec imported us
+    const def = M[pyinit]();
+    if (def === 0) { log('  [C] ' + fullname + ' PyInit returned NULL'); return false; }
+    let mod = null;
+    try { if (!M.wasthon.moduleDefs.get(def)) mod = M.wasthon.handles.get(def); } catch(e){}
+    if (!mod) {
+      try { const di = M.wasthon.moduleDefs.get(def); if (di) di.name = fullname; } catch(e){}
+      const cmod = M._wasthon_module_create(def);
+      if (cmod === 0) {
+        const pe = M.wasthon && M.wasthon.pendingException;
+        let pm = '(silent)';
+        if (pe) {
+          try { pm = String(_b_.str.$factory(pe.value || pe.msg)); } catch(e) { pm = String(pe.msg); }
+          try { pm = ($B.class_name(pe.value || M.wasthon.unwrap(pe.exc)) || '') + ': ' + pm; } catch(e){}
+        }
+        log('  [C] ' + fullname + ' init FAILED: ' + String(pm).slice(0, 200));
+        return false;
+      }
+      mod = M.wasthon.handles.get(cmod);
+    } else {
+      try { $B.str_dict_set($B.get_dict(mod), '__name__', fullname); } catch(e){}
+    }
+    $B.imported[fullname] = mod;
+    if (parent) { try { $B.str_dict_set($B.get_dict($B.imported[parent]), parts[parts.length - 1], mod); } catch(e){} }
+    return true;
+  }
+
+  $B.$__import__ = function(mod_name, globals, locals, fromlist, level) {
+    try {
+      if (level > 0 && typeof mod_name === 'string' && mod_name) {
+        const abs = 'numpy.random.' + mod_name;
+        if (RAND_C[abs]) { runC(abs, RAND_C[abs]); if ($B.imported[abs]) return $B.imported[abs]; }
+        for (const pref of ['pandas._libs.tslibs.', 'pandas._libs.window.', 'pandas._libs.']) {
+          const pabs = pref + mod_name;
+          if (PD_C[pabs]) { runC(pabs, PD_C[pabs]); if ($B.imported[pabs]) return $B.imported[pabs]; }
+        }
+      }
+      if (typeof mod_name === 'string') {
+        if (mod_name === 'numpy._core._multiarray_umath') runMA();
+        if (RAND_C[mod_name]) runC(mod_name, RAND_C[mod_name]);
+        if (PD_C[mod_name]) runC(mod_name, PD_C[mod_name]);
+        if (fromlist && fromlist.length) for (const f of fromlist) {
+          try {
+            const sub = mod_name + '.' + (typeof f === 'string' ? f : $B.$getattr(f, '__name__', f));
+            if (mod_name === 'numpy._core' && sub === 'numpy._core._multiarray_umath') runMA();
+            if (RAND_C[sub]) runC(sub, RAND_C[sub]);
+            if (PD_C[sub]) runC(sub, PD_C[sub]);
+          } catch(e){}
+        }
+      }
+    } catch(e) { console.warn('import hook:', e); }
+    return orig.apply(this, arguments);
+  };
+
+  const runnerSrc = document.getElementById('runner').textContent;
+  const driver = runnerSrc + `
+
+# dateutil reads its embedded zoneinfo tarball through pkgutil.get_data
+# (pandas' timezones C module calls gettz("UTC") at init); serve the
+# base64 payload from the page. Must run before any dateutil import.
+import base64
+import pkgutil
+from browser import window
+_zdata = base64.b64decode(window.DATEUTIL_ZONEINFO_B64)
+_orig_get_data = pkgutil.get_data
+def _get_data(package, resource):
+    if package == "dateutil.zoneinfo" and resource.endswith(".tar.gz"):
+        return _zdata
+    return _orig_get_data(package, resource)
+pkgutil.get_data = _get_data
+
+try:
+    _mod = __import__(${JSON.stringify(TEST)}, fromlist=["_"])
+except BaseException as _e:
+    print("IMPORT FAILED: " + type(_e).__name__ + ": " + str(_e)[:150])
+else:
+    _p, _f, _s, _fails = run_module(_mod)
+    print("ran=" + str(_p + _f + _s))
+    print("passed=" + str(_p))
+    print("failed+errored=" + str(_f))
+    print("skipped=" + str(_s))
+    for _m in _fails[:12]:
+        print("  FAIL " + _m)
+print("=== done ===")
+`;
+  const origConsole = console.log;
+  console.log = (...a) => { logEl.textContent += a.map(x => typeof x === 'string' ? x : String(x)).join(' '); };
+  const t0 = performance.now();
+  log('module: ' + TEST);
+  try { $B.runPythonSource(driver, 'pandas_test_' + TEST.replace(/\./g, '_')); }
+  finally { console.log = origConsole; }
+  log('(' + (performance.now() - t0).toFixed(0) + ' ms)');
+} catch(e) {
+  log('BOOT FAILED: ' + (e && (e.args ? String(e.args[0]) : (e.stack || e.message || e))));
+  log('=== done ===');
+  console.error(e);
+}
+</script>
+</body>
+</html>

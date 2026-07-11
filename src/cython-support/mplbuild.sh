@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# Build the combined numpy + matplotlib + kiwisolver wasm
+# (build/npmpl.{mjs,wasm}): the numpy C core plus matplotlib's Agg C
+# extensions (_c_internal_utils, ft2font, _path, _image, _backend_agg +
+# the vendored Agg sources) and kiwisolver's _cext, all in ONE module so
+# they share numpy's runtime CAPI table (PyArray_API). This is what
+# loader/test-matplotlib.html loads.
+#
+# Usage: ./mplbuild.sh <matplotlib-3.9.2-src> <numpy-2.5.1-src> <kiwisolver-1.4.7-src>
+#
+# Prerequisites:
+#   - numpy-probe/obj/*.o          — run  numpy-probe/probe.sh <numpy-src>  first.
+#   - build/nprnd-obj/tanh_stub.o  — run  cython-support/nprnd.sh <numpy-src>.
+#   - build/wasthon.o              — any build.sh target compiles it.
+#   - pybind11 headers importable  — PYBIND11_INC or `python3 -c "import pybind11"`.
+#   - cppy headers importable      — CPPY_INC or `python3 -c "import cppy"`.
+#
+# Native-extension notes (the whole reason a support layer is needed):
+#   pybind11 layer  matplotlib's modules bind through pybind11 (C++), not the
+#       raw C-API. pybind11_compat.h (force-included) fills the bounded set of
+#       symbols wasthon.h lacks (thread-state/TSS stubs, check macros,
+#       managed-dict no-ops); a handful of seds patch the pybind11 headers
+#       themselves (raw ob_type reads, the runtime-disabled traceback walk,
+#       the ml_meth function->void* store).
+#   FreeType    ft2font needs FreeType — emscripten ships a port, so just
+#       -sUSE_FREETYPE=1 (no vendoring).
+#   PyCFunction cast   raw-C-API method tables in ft2font_wrapper /
+#       _backend_agg_wrapper / kiwisolver cast funcs to (PyCFunction), which
+#       is ill-formed when stored into wasthon's void* ml_meth in C++ —
+#       rewrite the cast to (void *).
+set -u
+MPL="${1:?path to matplotlib 3.9.2 source tree}"
+NP="${2:?path to numpy 2.5.1 source tree}"
+KIWI="${3:?path to kiwisolver 1.4.7 source tree}"
+CS="$(cd "$(dirname "$0")" && pwd)"; ROOT="$(cd "$CS/.." && pwd)"
+SRC="$ROOT/src"
+OUT="$ROOT/build/mpl-obj"; mkdir -p "$OUT"
+W="$ROOT"
+cd "$ROOT" && source external/emsdk/emsdk_env.sh >/dev/null 2>&1
+
+PYBIND11_INC="${PYBIND11_INC:-$(python3 -c 'import pybind11; print(pybind11.get_include())')}"
+CPPY_INC="${CPPY_INC:-$(python3 -c 'import cppy; print(cppy.get_include())')}"
+[ -f "$PYBIND11_INC/pybind11/pybind11.h" ] || { echo "pybind11 headers not found at $PYBIND11_INC"; exit 1; }
+[ -f "$CPPY_INC/cppy/cppy.h" ] || { echo "cppy headers not found at $CPPY_INC"; exit 1; }
+
+# --- 1. local, patched copy of the pybind11 headers (never mutate the
+#        shared install). The seds are what let pybind11 build on the
+#        handle bridge. ------------------------------------------------------
+PB="$OUT/pybind11-inc"
+rm -rf "$PB"; mkdir -p "$PB"; cp -r "$PYBIND11_INC/pybind11" "$PB/"
+P="$PB/pybind11"
+sed -i 's/if (m_trace) {/if (m_trace \&\& 0) {/' "$P/pytypes.h"
+sed -i 's/reinterpret_cast<PyTracebackObject \*>/reinterpret_cast<__wasthon_tb *>/' "$P/pytypes.h"
+sed -i 's/return o->ob_type == \&PyStaticMethod_Type;/return Py_TYPE(o) == \&PyStaticMethod_Type;/' "$P/pytypes.h"
+sed -i 's/src\.ptr()->ob_type->tp_as_number/Py_TYPE(src.ptr())->tp_as_number/' "$P/cast.h"
+sed -i 's/type->tp_as_async = \&heap_type->as_async;/\/* wasthon: no as_async *\//' "$P/detail/class.h"
+sed -i 's/= reinterpret_cast<PyCFunction>(reinterpret_cast<void (\*)()>(dispatcher));/= reinterpret_cast<void *>(dispatcher);/' "$P/pybind11.h"
+sed -i 's/tstate = PyGILState_GetThisThreadState();/tstate = (PyThreadState *)PyGILState_GetThisThreadState();/' "$P/gil.h"
+
+# --- 2. patch the raw-C-API method tables (idempotent: only (PyCFunction)
+#        left to rewrite; a re-run finds none). --------------------------------
+for f in "$MPL/src/ft2font_wrapper.cpp" "$MPL/src/_backend_agg_wrapper.cpp" \
+         "$KIWI/py/src/"*.cpp; do
+  sed -i 's/( *PyCFunction *)/(void *)/g' "$f"
+done
+
+NPINC="-I $W/numpy-probe/gen -I $W/numpy-probe -I $NP/numpy/_core/include -I $NP/numpy/_core/include/numpy -I $NP/numpy/_core/src/common"
+CXX="em++ -O1 -std=c++17 -c -DNPY_NO_DEPRECATED_API=0 -include $CS/pybind11_compat.h"
+FT="-sUSE_FREETYPE=1 -DFREETYPE_BUILD_TYPE=\"system\""
+
+FAILED=""
+cc_mpl() {  # cc_mpl <name>
+  local base="$OUT/$1.o"
+  # shellcheck disable=SC2086
+  $CXX $FT -I "$SRC" -I "$PB" -I "$MPL/src" -I "$MPL/extern/agg24-svn/include" $NPINC \
+    "$MPL/src/$1.cpp" -o "$base" 2>"$OUT/$1.txt" || FAILED="$FAILED $1"
+}
+cc_agg() {
+  # shellcheck disable=SC2086
+  em++ -O1 -std=c++17 -c -I "$MPL/extern/agg24-svn/include" \
+    "$MPL/extern/agg24-svn/src/$1.cpp" -o "$OUT/$1.o" 2>"$OUT/$1.txt" || FAILED="$FAILED $1"
+}
+cc_kiwi() {
+  # shellcheck disable=SC2086
+  em++ -O1 -std=c++17 -c -include "$CS/pybind11_compat.h" \
+    -I "$SRC" -I "$CPPY_INC" -I "$KIWI" -I "$KIWI/py/src" \
+    "$KIWI/py/src/$1.cpp" -o "$OUT/kiwi_$1.o" 2>"$OUT/kiwi_$1.txt" || FAILED="$FAILED kiwi_$1"
+}
+
+for m in _c_internal_utils _path_wrapper _image_wrapper _backend_agg _backend_agg_wrapper \
+         ft2font ft2font_wrapper py_converters py_converters_11; do cc_mpl "$m"; done
+for a in agg_bezier_arc agg_curves agg_image_filters agg_trans_affine \
+         agg_vcgen_contour agg_vcgen_dash agg_vcgen_stroke agg_vpgen_segmentator; do cc_agg "$a"; done
+for k in kiwisolver constraint expression solver strength term variable; do cc_kiwi "$k"; done
+
+NOBJ=$(ls "$OUT"/*.o 2>/dev/null | wc -l)
+echo "compiled: $NOBJ objects; failed:${FAILED:- none}"
+[ -n "$FAILED" ] && { echo "aborting link"; exit 1; }
+
+# --- 3. link everything into ONE module with the numpy core so PyArray_API
+#        (matplotlib/kiwisolver only reference it) resolves at runtime. -------
+EXP='["_PyInit__multiarray_umath","_PyInit_ft2font","_PyInit__backend_agg","_PyInit__image","_PyInit__path","_PyInit__c_internal_utils","_PyInit__cext","_wasthon_init","_wasthon_module_create","_malloc","_free"]'
+emcc -O1 $FT \
+  "$W"/numpy-probe/obj/*.o "$W/build/nprnd-obj/tanh_stub.o" "$OUT"/*.o "$W/build/wasthon.o" \
+  --js-library "$SRC/wasthon.js" \
+  -s ALLOW_MEMORY_GROWTH=1 -s ALLOW_TABLE_GROWTH=1 -sSTACK_SIZE=5242880 --profiling-funcs \
+  -Wl,--allow-multiple-definition -s ERROR_ON_UNDEFINED_SYMBOLS=1 \
+  -s EXPORTED_FUNCTIONS="$EXP" \
+  -s EXPORTED_RUNTIME_METHODS='["HEAPU8","HEAP32","UTF8ToString","stringToUTF8","lengthBytesUTF8","wasmTable"]' \
+  -s MODULARIZE=1 -s EXPORT_ES6=1 -s EXPORT_NAME=npmpl \
+  -o "$W/build/npmpl.mjs" || { echo "LINK FAILED"; exit 1; }
+echo "built build/npmpl.{mjs,wasm}  ($(du -h "$W/build/npmpl.wasm" | cut -f1))"

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>NumBry tests</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+  h1 { font-size: 1.6rem; }
+  h2 { font-size: 1.1rem; border-bottom: 1px solid #ccc; padding-bottom: 0.2em; margin-top: 1.8em; }
+  ul.dash { list-style: none; padding: 0; }
+  ul.dash li { margin: 0.6em 0; }
+  ul.dash li a { text-decoration: none; color: #04a; }
+  ul.dash li a:hover { text-decoration: underline; }
+  .note { color: #666; font-size: 0.9em; }
+</style>
+</head>
+<body>
+
+<h1>NumBry tests</h1>
+
+<p class="note">
+  Wasthon runs real CPython C extensions — and the numpy / pandas / scipy
+  scientific stack — in the browser on top of Brython. Each dashboard below
+  runs an upstream project's <em>own</em> test suite against the wasm builds,
+  one fresh page per module, with per-module scores.
+</p>
+
+<h2>Test-suite dashboards</h2>
+<ul class="dash">
+  <li><a href="test-cpython-all.html"><strong>▶ CPython suite dashboard</strong></a> — CPython's own <code>Lib/test/test_*.py</code> against the 25 ported modules (the authoritative behavioural reference).</li>
+  <li><a href="test-numpy-all.html"><strong>▶ numpy suite dashboard</strong></a> — modules from <code>numpy 2.5.1</code>'s own suite (<code>numpy/**/tests</code>) against the C core + numpy.random wasm. Single module: <code>test-numpy.html?test=…</code>.</li>
+  <li><a href="test-scipy-all.html"><strong>▶ scipy suite dashboard</strong></a> — <code>SciPy 1.14.1</code>'s own <code>scipy/ndimage/tests</code> against the compiled <code>_nd_image</code>/<code>_ni_label</code> wasm. Single module: <code>test-scipy.html?test=…</code>.</li>
+  <li><a href="test-pandas-all.html"><strong>▶ pandas suite dashboard</strong></a> — <code>pandas 2.2.3</code>'s own <code>pandas/tests/tslibs</code> + <code>libs</code> against the 43 compiled <code>pandas._libs</code> wasm modules. Single module: <code>test-pandas-mod.html?test=…</code>.</li>
+</ul>
+
+<h2>Smoke pages</h2>
+<ul class="dash">
+  <li><a href="numpy.html"><strong>▶ numpy</strong></a> — arrays, reductions, ufuncs, <code>@</code>, slicing, subclassing, linalg.</li>
+  <li><a href="test-pandas.html"><strong>▶ pandas</strong></a> — Series/DataFrame/groupby/merge/pivot/read_csv/to_json… (20 checks).</li>
+  <li><a href="test-scipy-ndimage.html"><strong>▶ scipy.ndimage</strong></a> — filters, interpolation, morphology, label/measurements (19 checks).</li>
+  <li><a href="test-all.html"><strong>▶ Run all module tests</strong></a> — sequential runner across every <code>test-*.html</code> smoke page.</li>
+  <li><a href="wasthonp.html"><strong>▶ wasthonp parser demo</strong></a> — CPython's real PEG parser compiled to WASM as a drop-in for Brython's JS parser.</li>
+</ul>
+
+</body>
+</html>

@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>wasthon — numpy suite dashboard</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { padding: 6px 10px; text-align: right; border-bottom: 1px solid #ddd; }
+  th:first-child, td:first-child { text-align: left; }
+  th { background: #f4f4f4; }
+  tr.pending td { color: #999; }
+  tr.running td { color: #04a; }
+  tr.allpass  { background: #e8f6e8; }
+  tr.somefail { background: #fde8e8; }
+  tr.importfail { background: #fff4e0; }
+  tr.timeout  { background: #fff4e0; }
+  td.num { font-variant-numeric: tabular-nums; }
+  .bar { display:inline-block; height:10px; background:#0a0; border-radius:2px; vertical-align:middle; }
+  .barbg { display:inline-block; height:10px; width:80px; background:#eee; border-radius:2px; vertical-align:middle; text-align:left; }
+  #summary { font-size: 1.1rem; margin-top: 1.5rem; font-weight: 600; }
+  code { background:#f0f0f0; padding:0 3px; border-radius:3px; }
+</style>
+</head>
+<body>
+<p style="font-size:0.85em;margin:0 0 1em 0;"><a href="index.html">← back to index</a></p>
+<h1>wasthon — numpy suite dashboard</h1>
+<p style="color:#666;font-size:0.9em;max-width:74ch;">
+  Runs modules from <b>numpy 2.5.1</b>'s own test suite
+  (<code>numpy/**/tests/test_*.py</code>) against wasthon, each in a fresh page
+  (<code>test-numpy.html?test=…</code>) so no module contaminates another. A minimal
+  <code>pytest</code> shim supplies <code>raises</code>/<code>mark.parametrize</code>/
+  <code>fixture</code>/… Scores are numpy's own assertions. Only the pytest-portable
+  subset is listed — modules needing <code>numpy.random</code>, C test-extensions,
+  <code>ctypes</code>/<code>mmap</code>/<code>zoneinfo</code>, or <code>hypothesis</code>
+  are out of scope. Failures are real bridge/behaviour gaps (the backlog to fix);
+  a few come from the shim's fixture limits.
+</p>
+
+<table id="results">
+  <thead><tr>
+    <th>Module</th><th>ran</th><th>pass</th><th>fail</th><th>skip</th><th>pass rate</th><th>status</th>
+  </tr></thead>
+  <tbody></tbody>
+</table>
+
+<div id="summary">⏳ Running…</div>
+
+<script>
+// numpy test modules from the pytest-portable subset, cleanest first. Each runs
+// in its own iframe (fresh numpy) — the C core corrupts if many share one page.
+const MODULES = [
+  'numpy._core.tests.test_indexerrors',
+  'numpy._core.tests.test_abc',
+  'numpy._core.tests.test_array_api_info',
+  'numpy._core.tests.test_umath_complex',
+  'numpy._core.tests.test_scalar_ctors',
+  'numpy._core.tests.test_scalarprint',
+  'numpy._core.tests.test_function_base',
+  'numpy._core.tests.test_arraymethod',
+  'numpy._core.tests.test_print',
+  'numpy._core.tests.test__exceptions',
+  'numpy._core.tests.test_errstate',
+  'numpy._core.tests.test_half',
+  'numpy._core.tests.test_longdouble',
+  'numpy._core.tests.test_scalar_methods',
+  'numpy._core.tests.test_dlpack',
+  'numpy._core.tests.test_defchararray',
+  'numpy._core.tests.test_finfo',
+  'numpy._core.tests.test_scalarinherit',
+  'numpy.lib.tests.test__version',
+  'numpy.lib.tests.test_array_utils',
+  'numpy.lib.tests.test_utils',
+  'numpy.lib.tests.test_ufunclike',
+  'numpy.lib.tests.test_mixins',
+  'numpy.lib.tests.test_arraypad',
+  'numpy.matrixlib.tests.test_defmatrix',
+  'numpy.polynomial.tests.test_polyutils',
+  // numpy.random — run against the combined numpy+random wasm (test-numpy-random.html)
+  'numpy.random.tests.test_seed_sequence',
+  'numpy.random.tests.test_smoke',
+  'numpy.random.tests.test_direct',
+  'numpy.random.tests.test_generator_mt19937',
+  'numpy.random.tests.test_generator_mt19937_regressions',
+  'numpy.random.tests.test_randomstate',
+  'numpy.random.tests.test_randomstate_regression',
+  'numpy.random.tests.test_random',
+  'numpy.random.tests.test_regression',
+];
+
+// numpy.random tests need the combined wasm (numpy core + the 9 Cython random
+// modules in one shared memory); everything else uses the numpy-core runner.
+function runnerFor(mod) {
+  return mod.startsWith('numpy.random.') ? 'test-numpy-random.html' : 'test-numpy.html';
+}
+
+const TIMEOUT_MS = 120_000;
+const POLL_MS = 300;
+
+function shortName(m) { return m.split('.').slice(-1)[0] + ' · ' + m.split('.').slice(0, -1).slice(-2).join('.'); }
+
+function init() {
+  const tbody = document.querySelector('#results tbody');
+  for (const m of MODULES) {
+    const tr = document.createElement('tr');
+    tr.className = 'pending';
+    tr.innerHTML = `<td><a href="${runnerFor(m)}?test=${m}" target="_blank">${shortName(m)}</a></td>
+      <td class="num">—</td><td class="num">—</td><td class="num">—</td>
+      <td class="num">—</td><td>—</td><td>⏳</td>`;
+    tbody.appendChild(tr);
+  }
+}
+function setRow(idx, cls, cells) {
+  const tr = document.querySelector('#results tbody').children[idx];
+  tr.className = cls;
+  for (let i = 0; i < cells.length; i++) tr.children[i + 1].innerHTML = cells[i];
+}
+function parseCounts(log) {
+  const g = (re) => { const m = log.match(re); return m ? parseInt(m[1], 10) : null; };
+  const imp = log.match(/IMPORT FAILED:\s*(.+)/);
+  return {
+    ran: g(/ran\s*=\s*(\d+)/),
+    passed: g(/passed\s*=\s*(\d+)/),
+    fail: g(/failed\+errored\s*=\s*(\d+)/),
+    skipped: g(/skipped\s*=\s*(\d+)/),
+    importFailed: !!imp,
+    importMsg: imp ? imp[1].trim().slice(0, 120) : '',
+  };
+}
+
+function runOne(mod, idx) {
+  setRow(idx, 'running', ['…', '…', '…', '…', '…', '🔄']);
+  return new Promise(resolve => {
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    iframe.src = `${runnerFor(mod)}?test=${mod}`;
+    document.body.appendChild(iframe);
+    const finish = (result) => {
+      clearInterval(poller); clearTimeout(timer);
+      try { document.body.removeChild(iframe); } catch (_) {}
+      resolve(result);
+    };
+    const poller = setInterval(() => {
+      let doc;
+      try { doc = iframe.contentDocument; } catch (_) { return; }
+      if (!doc) return;
+      const el = doc.querySelector('#log');
+      if (!el) return;
+      const log = el.textContent || '';
+      if (!log.includes('=== done ===')) return;
+      const c = parseCounts(log);
+      if (c.importFailed) {
+        setRow(idx, 'importfail', ['—', '—', '—', '—', '—', '⚠ ' + (c.importMsg || 'import failed')]);
+        finish({ importFailed: true }); return;
+      }
+      const fail = c.fail || 0, ran = c.ran || 0, passed = c.passed || 0, skipped = c.skipped || 0;
+      const runnable = passed + fail;
+      // 0 runnable (everything skipped): nothing failed — that's 100%,
+      // not 0% (the 1.0 gate is pass/(pass+fail), skips excluded).
+      const rate = runnable ? Math.round(100 * passed / runnable) : 100;
+      const bar = `<span class="barbg"><span class="bar" style="width:${Math.round(0.8 * rate)}px"></span></span> ${rate}%`;
+      const allpass = fail === 0 && ran > 0;
+      setRow(idx, allpass ? 'allpass' : 'somefail', [ran, passed, fail, skipped, bar, allpass ? '✓' : '✗']);
+      finish({ ran, passed, fail, skipped, allpass });
+    }, POLL_MS);
+    const timer = setTimeout(() => {
+      setRow(idx, 'timeout', ['—', '—', '—', '—', '—', '⏱ timeout']);
+      finish({ timeout: true });
+    }, TIMEOUT_MS);
+  });
+}
+
+async function runAll() {
+  let totRan = 0, totPass = 0, totFail = 0, totSkip = 0, modsOK = 0, modsRun = 0, importFails = 0;
+  for (let i = 0; i < MODULES.length; i++) {
+    const r = await runOne(MODULES[i], i);
+    if (r.importFailed) { importFails++; continue; }
+    if (r.timeout) continue;
+    modsRun++;
+    if (r.allpass) modsOK++;
+    totRan += r.ran; totPass += r.passed; totFail += r.fail; totSkip += r.skipped;
+    const runnable = totPass + totFail;
+    document.getElementById('summary').innerHTML =
+      `<b>${modsOK}/${modsRun}</b> modules fully green &nbsp;|&nbsp; assertions: ` +
+      `<b>${totPass}/${runnable}</b> pass (${runnable ? Math.round(100 * totPass / runnable) : 100}%), ` +
+      `${totFail} fail, ${totSkip} skip` +
+      (importFails ? ` &nbsp;|&nbsp; ${importFails} import-failed` : '') +
+      (i + 1 < MODULES.length ? ' &nbsp;·&nbsp; running…' : '');
+  }
+}
+
+init();
+runAll();
+</script>
+</body>
+</html>

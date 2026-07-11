@@ -1,0 +1,154 @@
+--- numpy/_core/src/multiarray/methods.c	2026-07-06 22:57:47.926639112 +0200
++++ numpy/_core/src/multiarray/methods.c	2026-07-06 12:48:35.007261197 +0200
+@@ -1997,8 +1997,8 @@
+     descr = PyArray_DESCR(self);
+     if ((protocol < 5) ||
+         PyDataType_FLAGCHK(descr, NPY_ITEM_HASOBJECT) ||
+-        (PyType_IsSubtype(((PyObject*)self)->ob_type, &PyArray_Type) &&
+-         ((PyObject*)self)->ob_type != &PyArray_Type) ||
++        (PyType_IsSubtype(Py_TYPE((PyObject*)self), &PyArray_Type) &&
++         Py_TYPE((PyObject*)self) != &PyArray_Type) ||
+         descr->elsize == 0) {
+         /* The PickleBuffer class from version 5 of the pickle protocol
+          * can only be used for arrays backed by a contiguous data buffer.
+--- numpy/_core/src/umath/override.c	2026-07-06 22:57:48.127640796 +0200
++++ numpy/_core/src/umath/override.c	2026-07-06 13:00:53.967195004 +0200
+@@ -74,7 +74,7 @@
+                 PyErr_Format(PyExc_TypeError,
+                              "operand '%.200s' does not support ufuncs "
+                              "(__array_ufunc__=None)",
+-                             obj->ob_type->tp_name);
++                             Py_TYPE(obj)->tp_name);
+                 Py_DECREF(method);
+                 goto fail;
+             }
+--- numpy/_core/src/multiarray/stringdtype/dtype.c	2026-07-06 22:57:48.313642354 +0200
++++ numpy/_core/src/multiarray/stringdtype/dtype.c	2026-07-06 22:53:03.000802560 +0200
+@@ -1029,7 +1029,7 @@
+     };
+ 
+     /* Loaded dynamically, so needs to be set here: */
+-    ((PyObject *)&PyArray_StringDType)->ob_type = &PyArrayDTypeMeta_Type;
++    Py_SET_TYPE((PyObject *)&PyArray_StringDType, &PyArrayDTypeMeta_Type);
+     ((PyTypeObject *)&PyArray_StringDType)->tp_base = &PyArrayDescr_Type;
+     if (PyType_Ready((PyTypeObject *)&PyArray_StringDType) < 0) {
+         return -1;
+--- numpy/_core/src/multiarray/dtypemeta.c	2026-07-06 22:57:48.499643912 +0200
++++ numpy/_core/src/multiarray/dtypemeta.c	2026-07-06 22:53:03.000548782 +0200
+@@ -1285,6 +1285,7 @@
+         Py_DECREF(dtype_class);
+         return NULL;
+     }
++    Py_SET_TYPE((PyObject *)dtype_class, &PyArrayDTypeMeta_Type);
+     dt_slots->castingimpls = PyDict_New();
+     if (dt_slots->castingimpls == NULL) {
+         Py_DECREF(dtype_class);
+--- numpy/_core/src/multiarray/arraytypes.c.src	2026-07-06 22:57:48.674645378 +0200
++++ numpy/_core/src/multiarray/arraytypes.c.src	2026-07-06 22:53:03.000724163 +0200
+@@ -544,6 +544,12 @@
+         return npy_longdouble_from_PyLong(op);
+     }
+ 
++    if (!PyUnicode_Check(op) && !PyBytes_Check(op)) {
++        double _wd = PyFloat_AsDouble(op);
++        if (!PyErr_Occurred()) { return (npy_longdouble)_wd; }
++        PyErr_Clear();
++    }
++
+     if (PyUnicode_Check(op)) {
+         b = PyUnicode_AsUTF8String(op);
+         if (!b) {
+--- numpy/_core/src/multiarray/abstractdtypes.c	2026-07-06 22:57:48.824646634 +0200
++++ numpy/_core/src/multiarray/abstractdtypes.c	2026-07-06 22:55:59.628844219 +0200
+@@ -88,12 +88,15 @@
+     if (PyType_Ready((PyTypeObject *)&PyArray_IntAbstractDType) < 0) {
+         return -1;
+     }
++    Py_SET_TYPE((PyObject *)&PyArray_IntAbstractDType, &PyArrayDTypeMeta_Type);
+     if (PyType_Ready((PyTypeObject *)&PyArray_FloatAbstractDType) < 0) {
+         return -1;
+     }
++    Py_SET_TYPE((PyObject *)&PyArray_FloatAbstractDType, &PyArrayDTypeMeta_Type);
+     if (PyType_Ready((PyTypeObject *)&PyArray_ComplexAbstractDType) < 0) {
+         return -1;
+     }
++    Py_SET_TYPE((PyObject *)&PyArray_ComplexAbstractDType, &PyArrayDTypeMeta_Type);
+     /*
+      * Delayed assignments to avoid "error C2099: initializer is not a constant"
+      * in windows compilers.  Can hopefully be done in structs in the future.
+@@ -104,18 +107,21 @@
+     if (PyType_Ready((PyTypeObject *)&PyArray_PyLongDType) < 0) {
+         return -1;
+     }
++    Py_SET_TYPE((PyObject *)&PyArray_PyLongDType, &PyArrayDTypeMeta_Type);
+     ((PyTypeObject *)&PyArray_PyFloatDType)->tp_base =
+         (PyTypeObject *)&PyArray_FloatAbstractDType;
+     PyArray_PyFloatDType.scalar_type = &PyFloat_Type;
+     if (PyType_Ready((PyTypeObject *)&PyArray_PyFloatDType) < 0) {
+         return -1;
+     }
++    Py_SET_TYPE((PyObject *)&PyArray_PyFloatDType, &PyArrayDTypeMeta_Type);
+     ((PyTypeObject *)&PyArray_PyComplexDType)->tp_base =
+         (PyTypeObject *)&PyArray_ComplexAbstractDType;
+     PyArray_PyComplexDType.scalar_type = &PyComplex_Type;
+     if (PyType_Ready((PyTypeObject *)&PyArray_PyComplexDType) < 0) {
+         return -1;
+     }
++    Py_SET_TYPE((PyObject *)&PyArray_PyComplexDType, &PyArrayDTypeMeta_Type);
+ 
+     /* Register the new DTypes for discovery */
+     if (_PyArray_MapPyTypeToDType(
+--- numpy/_core/src/multiarray/compiled_base.c
++++ numpy/_core/src/multiarray/compiled_base.c
+@@ -1501,6 +1501,33 @@
+     const char *docstr;
+     static const char msg[] = "already has a different docstring";
+ 
++    /* wasthon: the struct-field writes below (new->tp_doc, new->m_ml->ml_doc, …)
++     * dereference our opaque bridge handles as C structs (OOB). But the doc/
++     * signature ARE needed (help(), inspect.signature, IDE, and numpy's own
++     * introspection tests). Parse the args safely, then set __doc__ +
++     * __text_signature__ JS-side via the bridge, skipping the struct writes. */
++    {
++        extern void wasthon_set_docstring(PyObject *obj, const char *doc);
++        (void)msg;
++        NPY_PREPARE_ARGPARSER;
++        if (npy_parse_arguments("add_docstring", args, len_args, NULL,
++                {"", NULL, &obj},
++                {"", NULL, &str}) < 0) {
++            return NULL;
++        }
++        if (!PyUnicode_Check(str)) {
++            PyErr_SetString(PyExc_TypeError,
++                    "argument docstring of add_docstring should be a str");
++            return NULL;
++        }
++        docstr = PyUnicode_AsUTF8(str);
++        if (docstr == NULL) {
++            return NULL;
++        }
++        wasthon_set_docstring(obj, docstr);
++        Py_RETURN_NONE;
++    }
++
+     /* Don't add docstrings */
+ #if PY_VERSION_HEX > 0x030b0000
+     if (npy_static_cdata.optimize > 1) {
+
+--- numpy/_core/src/multiarray/scalartypes.c.src
++++ numpy/_core/src/multiarray/scalartypes.c.src
+@@ -4660,6 +4660,14 @@
+ 
+     PyArrayIter_Type.tp_iter = PyObject_SelfIter;
+     PyArrayMapIter_Type.tp_iter = PyObject_SelfIter;
++
++    /* wasthon: the two np.bool_ singletons are static structs whose
++     * PyObject_HEAD_INIT(&PyBoolArrType_Type) type slot is discarded by the
++     * bridge shim (like the dtype descrs). Record their type in the _cType
++     * side-table so gentype_richcompare's result (which returns these
++     * singletons) crosses the bridge as a real np.bool_ instead of JS null. */
++    Py_SET_TYPE((PyObject *)&_PyArrayScalar_BoolValues[0], &PyBoolArrType_Type);
++    Py_SET_TYPE((PyObject *)&_PyArrayScalar_BoolValues[1], &PyBoolArrType_Type);
+ }
+ 
+ typedef struct {

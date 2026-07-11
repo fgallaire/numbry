@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Wasthon — numpy test module</title>
+<script src="./brython/brython.js"></script>
+<script src="./brython/brython_stdlib.js"></script>
+<!-- numpy's Python layer + LAPACK stub + the pytest shim, as a Brython VFS -->
+<script src="../build/numpy_vfs.js"></script>
+</head>
+<body>
+<p style="font-size:0.85em;margin:0 0 1em 0;"><a href="index.html">← back to index</a></p>
+<h1>Wasthon — numpy test module</h1>
+<p style="color:#666;font-size:0.9em;max-width:70ch;">
+  Runs a single <b>numpy 2.5.1</b> test module (<code>numpy/**/tests/test_*.py</code>)
+  from numpy's own suite against wasthon, via a minimal <code>pytest</code> shim.
+  Pass <code>?test=numpy._core.tests.test_indexerrors</code> to pick a module.
+  The dashboard (<a href="test-numpy-all.html">test-numpy-all</a>) drives this page one module at a time.
+</p>
+<pre id="log" style="background:#f4f4f4;padding:1em;font-size:13px;line-height:1.4;"></pre>
+
+<!-- the collector/runner: finds Test* classes and test_* functions, expands
+     @pytest.mark.parametrize, runs each, counts pass/fail/skip. Non-executable
+     type so Brython doesn't auto-run it. -->
+<script type="text/x-numpy-runner" id="runner">
+import pytest as _pt
+
+def _expand_params(params):
+    if not params:
+        return [{}]
+    result = [{}]
+    for argnames, argvalues in reversed(params):
+        names = [n.strip() for n in (argnames.split(",") if isinstance(argnames, str) else argnames)]
+        factor = []
+        for v in argvalues:
+            val = v.values if type(v).__name__ == "_Param" else v
+            if len(names) == 1:
+                factor.append({names[0]: val})
+            else:
+                seq = val if isinstance(val, (tuple, list)) else (val,)
+                factor.append(dict(zip(names, seq)))
+        new = []
+        for base in result:
+            for f in factor:
+                d = dict(base); d.update(f); new.append(d)
+        result = new
+    return result
+
+def _expand(func):
+    return _expand_params(getattr(func, "_pytest_params", None))
+
+class _Request:
+    # pytest's `request` argument, minimally: .param (parametrized fixtures)
+    # and .getfixturevalue (test_finfo resolves its ma fixtures by name).
+    def __init__(self, mod, param=None):
+        self._mod = mod
+        self.param = param
+    def getfixturevalue(self, name):
+        return _call_fixture(self._mod, name, None)
+
+def _call_fixture(mod, name, param):
+    # NEVER convert an unresolved fixture into a skip: call any callable of
+    # that name (works even when the VFS carries an older pytest shim whose
+    # @fixture doesn't mark functions); a missing name raises the REAL error
+    # so the test counts as failed, as pytest would.
+    fn = getattr(mod, name, None)
+    if fn is None or not callable(fn):
+        raise AttributeError("fixture " + name + " not found in module")
+    args = ()
+    code = getattr(fn, "__code__", None)
+    if code is not None and code.co_argcount and code.co_varnames[0] == "request":
+        args = (_Request(mod, param),)
+    res = fn(*args)
+    if hasattr(res, "__next__"):
+        res = next(res)   # yield fixture: setup value (no teardown)
+    return res
+
+def _fixture_cases(func, mod, cases):
+    # pytest fixture injection, minimally: resolve a test's missing
+    # positional args through module-level @pytest.fixture functions.
+    # A params= fixture multiplies the cases (its value reaches the
+    # fixture body via request.param); `request` gets the stub above.
+    code = getattr(func, "__code__", None)
+    if code is None or mod is None:
+        return cases
+    names = [n for n in code.co_varnames[:code.co_argcount] if n != "self"]
+    for name in names:
+        if all(name in c for c in cases):
+            continue
+        if name == "request":
+            for c in cases:
+                c.setdefault("request", _Request(mod))
+            continue
+        fn = getattr(mod, name, None)
+        if fn is None or not getattr(fn, "_pytest_fixture", False):
+            continue
+        params = getattr(fn, "_pytest_fixture_params", None)
+        if params:
+            new = []
+            for c in cases:
+                for p in params:
+                    d = dict(c); d[name] = _call_fixture(mod, name, p); new.append(d)
+            cases = new
+        else:
+            for c in cases:
+                c[name] = _call_fixture(mod, name, None)
+    return cases
+
+def _run_one(func, label, out, mod=None, base=None):
+    if getattr(func, "_pytest_skip", False):
+        out[2] += 1; return
+    try:
+        cases = _expand(func)
+        if base:
+            merged = []
+            for b in base:
+                for c in cases:
+                    d = dict(b); d.update(c); merged.append(d)
+            cases = merged
+        cases = _fixture_cases(func, mod, cases)
+    except Exception:
+        cases = [{}]
+    for kwargs in cases:
+        try:
+            func(**kwargs)
+            out[0] += 1
+        except _pt.Skipped:
+            out[2] += 1
+        except _pt.XFailed:
+            out[2] += 1
+        except BaseException as e:
+            if getattr(func, "_pytest_xfail", False):
+                out[2] += 1; continue
+            out[1] += 1
+            out[3].append(label + ": " + type(e).__name__ + ": " + str(e)[:80])
+
+def run_module(mod):
+    out = [0, 0, 0, []]   # passed, failed, skipped, failmsgs
+    names = dir(mod)
+    for name in names:
+        if not name.startswith("test_"):
+            continue
+        obj = getattr(mod, name, None)
+        if callable(obj) and not isinstance(obj, type):
+            _run_one(obj, name, out, mod)
+    for name in names:
+        cls = getattr(mod, name, None)
+        if isinstance(cls, type) and name.startswith("Test"):
+            if getattr(cls, "_pytest_skip", False):
+                continue
+            # pytest runs setup_class ONCE before the class's tests (numpy's
+            # test_direct loads its CSV seed/data vectors there). Failure
+            # semantics match pytest: error -> every test errors,
+            # pytest.skip -> every test skips.
+            sc_exc = None
+            sc = getattr(cls, "setup_class", None)
+            if sc:
+                try: sc()
+                except _pt.Skipped: sc_exc = "skip"
+                except BaseException as e:
+                    sc_exc = "setup_class " + type(e).__name__ + ": " + str(e)[:60]
+            for mname in dir(cls):
+                if not mname.startswith("test_"):
+                    continue
+                # Skip non-callable class attributes that merely start with
+                # "test_" — e.g. numpy's parametrize DATA tables
+                # (`test_cases_gh_28679 = [...]` in test_scalarprint). Collecting
+                # them as tests raised "'list' object is not callable" =
+                # phantom failures. (The module-level loop already guards this.)
+                if not callable(getattr(cls, mname, None)):
+                    continue
+                if sc_exc == "skip":
+                    out[2] += 1; continue
+                if sc_exc:
+                    out[1] += 1; out[3].append(name + "." + mname + ": " + sc_exc); continue
+                try:
+                    inst = cls()
+                except BaseException as e:
+                    out[1] += 1; out[3].append(name + "." + mname + ": ctor " + type(e).__name__); continue
+                for setup in ("setup_method", "setup"):
+                    su = getattr(inst, setup, None)
+                    if su:
+                        try: su()
+                        except TypeError:
+                            try: su(getattr(inst, mname))
+                            except Exception: pass
+                        except Exception: pass
+                        break
+                _run_one(getattr(inst, mname), name + "." + mname, out, mod,
+                         _expand_params(getattr(cls, "_pytest_params", None)))
+    return out
+</script>
+
+<script type="module">
+const logEl = document.getElementById('log');
+const log = (s) => { logEl.textContent += s + '\n'; };
+
+const params = new URLSearchParams(location.search);
+const TEST = params.get('test') || 'numpy._core.tests.test_indexerrors';
+
+const $B = window.__BRYTHON__;
+globalThis.$B = $B;
+globalThis.__BRYTHON__ = $B;
+globalThis._b_ = $B.builtins;
+
+try {
+  log('module: ' + TEST);
+  log('loading numpy (C core wasm + Python layer VFS)…');
+
+  const factory = (await import('../build/numpy_multiarray_umath.mjs')).default;
+  const M = await factory();
+  M._wasthon_init();
+
+  // hook __import__ to create the C extension lazily (as in numpy.html)
+  const orig = $B.$__import__;
+  $B.$__import__ = function(mod_name){
+    if (mod_name === 'numpy._core._multiarray_umath' && $B.imported[mod_name] === undefined){
+      const def = M._PyInit__multiarray_umath();
+      const cmod = M._wasthon_module_create(def);
+      if (cmod !== 0){
+        $B.imported[mod_name] = M.wasthon.handles.get(cmod);
+        try { $B.str_dict_set($B.get_dict($B.imported['numpy._core']), '_multiarray_umath', $B.imported[mod_name]); } catch(e){}
+      }
+    }
+    // real LAPACK (f2c'd lapack_lite + umath_linalg) instead of the VFS stub
+    if (mod_name === 'numpy.linalg._umath_linalg' && $B.imported[mod_name] === undefined){
+      const def = M._PyInit__umath_linalg();
+      const cmod = def && M._wasthon_module_create(def);
+      if (cmod){
+        $B.imported[mod_name] = M.wasthon.handles.get(cmod);
+        try { $B.str_dict_set($B.get_dict($B.imported['numpy.linalg']), '_umath_linalg', $B.imported[mod_name]); } catch(e){}
+      }
+    }
+    return orig.apply(this, arguments);
+  };
+
+  // driver: register run_module, import the target, run it, print machine-
+  // readable counts for the dashboard poller (ran=/passed=/failed+errored=/skipped=).
+  const runnerSrc = document.getElementById('runner').textContent;
+  const driver = runnerSrc + `
+
+try:
+    _mod = __import__(${JSON.stringify(TEST)}, fromlist=["_"])
+except BaseException as _e:
+    print("IMPORT FAILED: " + type(_e).__name__ + ": " + str(_e)[:150])
+else:
+    _p, _f, _s, _fails = run_module(_mod)
+    print("ran=" + str(_p + _f + _s))
+    print("passed=" + str(_p))
+    print("failed+errored=" + str(_f))
+    print("skipped=" + str(_s))
+    for _m in _fails[:12]:
+        print("  FAIL " + _m)
+print("=== done ===")
+`;
+
+  const origConsole = console.log;
+  console.log = (...a) => { logEl.textContent += a.map(x => typeof x === 'string' ? x : String(x)).join(' '); };
+  const t0 = performance.now();
+  try { $B.runPythonSource(driver, 'numpy_test_' + TEST.replace(/\./g, '_')); }
+  finally { console.log = origConsole; }
+  log('(' + (performance.now() - t0).toFixed(0) + ' ms)');
+} catch(e) {
+  log('IMPORT FAILED: ' + (e && (e.args ? String(e.args[0]) : (e.stack || e.message || e))));
+  log('=== done ===');
+  console.error(e);
+}
+</script>
+</body>
+</html>
