@@ -99,6 +99,9 @@ echo "=== scipy.ndimage -> build/npnd.mjs ==="
 CYTHON_PYTHONPATH="$CY" bash "$W/cython-support/ndbuild.sh" "$SC" "$NP"
 
 echo "=== VFS blobs (numpy / pandas+tests / scipy+tests) ==="
+# a git-tag tree lacks the two meson-generated modules the numpy boot imports
+( cd "$NP" && python3 numpy/_build_utils/gitversion.py --write numpy/version.py )
+cp "$W/numpy-probe/numpy__config__stub.py" "$NP/numpy/__config__.py"
 node "$W/numpy-probe/gen_numpy_vfs.mjs" "$NP/numpy" "$W/build/numpy_vfs.js"
 node "$W/cython-support/gen_pandas_vfs.mjs" "$PD" "$DEPS" --tests
 node "$W/cython-support/gen_scipy_vfs.mjs" "$SC"
