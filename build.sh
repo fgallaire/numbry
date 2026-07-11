@@ -93,7 +93,7 @@ echo "=== relink the two dashboard modules WITH linalg ==="
     -o "$W/build/nprnd.mjs" )
 
 echo "=== pandas._libs (43 extensions) -> build/nppd.mjs ==="
-bash "$W/cython-support/pdbuild.sh" "$PD"
+bash "$W/cython-support/pdbuild.sh" "$PD" "$NP"
 echo "=== scipy.ndimage -> build/npnd.mjs ==="
 bash "$W/cython-support/ndbuild.sh" "$SC" "$NP"
 
