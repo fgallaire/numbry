@@ -147,5 +147,8 @@ cp -r "$W/loader/brython" "$HERE/loader/brython"
 # the page: serve the pinned tree's test vectors as loader/data/
 mkdir -p "$HERE/loader/data"
 cp "$NP"/numpy/random/tests/data/*.csv "$NP"/numpy/random/tests/data/*.pkl.gz "$HERE/loader/data/"
+# scipy.ndimage test_measurements loadtxt's its label vectors the same way
+# (test-scipy.html's os.path.exists probe resolves them through Brython's open)
+cp "$SC"/scipy/ndimage/tests/data/label_*.txt "$HERE/loader/data/"
 
 echo "=== done: build/{numpy_multiarray_umath,nprnd,npnd,nppd}.{mjs,wasm} + 4 VFS blobs + loader/brython ==="

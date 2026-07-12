@@ -27,6 +27,27 @@
 <script type="text/x-scipy-runner" id="runner">
 import pytest as _pt
 
+# numpy's DataSource (np.loadtxt path) gates every open() on os.path.exists,
+# which knows nothing of Brython's XHR-backed open. Probe by opening: the
+# test data files are served under loader/ (see build.sh's loader/data copy).
+import os.path as _osp
+_osp_exists = _osp.exists
+def _exists_probe(p):
+    try:
+        if _osp_exists(p):
+            return True
+    except Exception:
+        pass
+    if isinstance(p, str) and p and not p.endswith("/"):
+        try:
+            f = open(p)
+            f.close()
+            return True
+        except Exception:
+            return False
+    return False
+_osp.exists = _exists_probe
+
 def _expand_params(params):
     if not params:
         return [{}]
