@@ -77,13 +77,23 @@ for F in ni_filters ni_fourier ni_interpolation ni_measure ni_morphology ni_spli
   N=$(grep -c 'error:' "$OUT/${F}_cc.txt" || true); [ "$N" != 0 ] && { echo "$F: errors=$N"; grep -m3 'error:' "$OUT/${F}_cc.txt"; FAILED="$FAILED $F"; }
 done
 
+# ---- numpy.fft C++ backend (_pocketfft_umath): scipy.ndimage.fourier needs
+# numpy.fft.{r,}fft. Header-only pocketfft (numpy/fft/pocketfft submodule).
+# Compiled here (into $OUT so it joins the link) and exported below. Plain
+# C-API ufunc module (no Cython/scipy compat headers, unlike $CFLAGS).
+em++ -O1 -c -std=c++17 -DNDEBUG -DPy_PYTHON_H -DNPY_NO_DEPRECATED_API=0 -Wno-macro-redefined \
+  -include "$SRC/patchlevel.h" -include "$CS/cython_compat.h" $NDINC -I "$NP/numpy/fft" \
+  "$NP/numpy/fft/_pocketfft_umath.cpp" -o "$OUT/_pocketfft_umath.o" 2>"$OUT/_pocketfft_umath_cc.txt" \
+  || FAILED="$FAILED _pocketfft_umath"
+N=$(grep -c 'error:' "$OUT/_pocketfft_umath_cc.txt" || true); [ "$N" != 0 ] && { echo "_pocketfft_umath: errors=$N"; grep -m3 'error:' "$OUT/_pocketfft_umath_cc.txt"; FAILED="$FAILED _pocketfft_umath"; }
+
 echo "=== compile done. FAILED:${FAILED:- none} ==="
 ls "$OUT"/*.o 2>/dev/null | wc -l
 if [ -n "$FAILED" ]; then echo "compile failures — not linking"; exit 1; fi
 
 # ---- link: numpy core + numpy.random + ndimage + wasthon -> build/npnd.{mjs,wasm}
 NR="$ROOT/build/nprnd-obj"
-EXP='"_PyInit__multiarray_umath","_wasthon_init","_wasthon_module_create","_malloc","_free","_PyInit__common","_PyInit_bit_generator","_PyInit__mt19937","_PyInit__philox","_PyInit__pcg64","_PyInit__sfc64","_PyInit__bounded_integers","_PyInit__generator","_PyInit_mtrand","_PyInit__nd_image","_PyInit__ni_label","_PyInit__ccallback_c","_PyInit__ctest","_PyInit__cytest"'
+EXP='"_PyInit__multiarray_umath","_wasthon_init","_wasthon_module_create","_malloc","_free","_PyInit__common","_PyInit_bit_generator","_PyInit__mt19937","_PyInit__philox","_PyInit__pcg64","_PyInit__sfc64","_PyInit__bounded_integers","_PyInit__generator","_PyInit_mtrand","_PyInit__nd_image","_PyInit__ni_label","_PyInit__ccallback_c","_PyInit__ctest","_PyInit__cytest","_PyInit__pocketfft_umath"'
 CY="$NR/_common.o $NR/bit_generator.o $NR/_mt19937.o $NR/_philox.o $NR/_pcg64.o $NR/_sfc64.o $NR/_bounded_integers.o $NR/_generator.o $NR/mtrand.o"
 ALGO="$NR/mt19937.o $NR/mt19937-jump.o $NR/philox.o $NR/pcg64.o $NR/sfc64.o $NR/legacy-distributions.o"
 emcc -O1 "$ROOT"/numpy-probe/obj/*.o "$ROOT/build/wasthon.o" "$NR/tanh_stub.o" $CY $ALGO "$NR"/npyrandom/*.o "$OUT"/*.o \

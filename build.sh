@@ -47,10 +47,12 @@ pin() {  # url dir ref
     git -C "$dir" checkout -q FETCH_HEAD
 }
 NP="$W/numpy-src";  pin https://github.com/numpy/numpy.git   "$NP" "$NUMPY_TAG"
-# numpy vendors two build-time submodules the sdist embeds but a tag clone
-# does not: the pythoncapi-compat header and the highway SIMD tree.
+# numpy vendors build-time submodules the sdist embeds but a tag clone does
+# not: the pythoncapi-compat header, the highway SIMD tree, and pocketfft
+# (numpy.fft's header-only C++ backend, compiled by ndbuild.sh).
 git -C "$NP" submodule update --init --depth 1 \
-    numpy/_core/src/common/pythoncapi-compat numpy/_core/src/highway
+    numpy/_core/src/common/pythoncapi-compat numpy/_core/src/highway \
+    numpy/fft/pocketfft
 PD="$W/pandas-src"; pin https://github.com/pandas-dev/pandas "$PD" "$PANDAS_TAG"
 SC="$W/scipy-src";  pin https://github.com/scipy/scipy.git   "$SC" "$SCIPY_TAG"
 MPL="$W/matplotlib-src"; pin https://github.com/matplotlib/matplotlib.git "$MPL" "$MPL_TAG"
