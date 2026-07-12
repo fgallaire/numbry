@@ -34,11 +34,23 @@ FAILED=""
 
 # ---- _ni_label: Cython (cimport numpy). Reuse the pandas patch chain (P5/P6
 # are no-ops here but harmless).
-build_pyx() {  # $1 = dotted module name, $2 = pyx path
+build_pyx() {  # $1 = dotted module name, $2 = pyx path, $3 = "pxd" to bind the adjacent .pxd
   local MOD="${1##*.}" C="$OUT/${1//./_}.c"
   rm -f "$C"
+  if [ "${3:-}" = "pxd" ]; then
+    # Cythonize under the SHORT name from the pyx's own directory: the only
+    # spelling under which Cython binds the adjacent .pxd (with the dotted
+    # --module-name it looks for scipy/ndimage/_cytest.pxd and finds nothing),
+    # and the .pxd is what makes Cython emit the __pyx_capi__ exports that
+    # LowLevelCallable.from_cython consumes. Same shape as upstream meson
+    # (short names from src/). The pages rename the module def to the dotted
+    # name at PyInit time.
+    ( cd "$(dirname "$2")" && PYTHONPATH="${CYTHON_PYTHONPATH:-}" python3 -m cython -3 -I "$NP" \
+      "$(basename "$2")" -o "$C" ) 2>"$OUT/${MOD}_cy.txt"
+  else
   PYTHONPATH="${CYTHON_PYTHONPATH:-}" python3 -m cython -3 -I "$NP" \
     --module-name "$1" "$2" -o "$C" 2>"$OUT/${MOD}_cy.txt"
+  fi
   if [ ! -f "$C" ]; then echo "$1: CYTHONIZE FAIL"; grep -m3 "error" "$OUT/${MOD}_cy.txt"; return 1; fi
   sed -i 's/def->ml_meth(/((PyCFunction)def->ml_meth)(/g' "$C"
   perl -0pi -e 's/__Pyx_copy_object_array\(src, \(\(PyListObject\*\)res\)->ob_item, n\);/{ Py_ssize_t _i; for(_i=0;_i<n;_i++){ Py_INCREF(src[_i]); PyList_SET_ITEM(res,_i,src[_i]); } }/g' "$C"
@@ -61,8 +73,9 @@ build_pyx "scipy.ndimage._ni_label" "$NDSRC/_ni_label.pyx" || FAILED="$FAILED _n
 # _ccallback_c: required at `import scipy` (scipy._lib._ccallback imports it
 # unconditionally). Self-contained Cython (cdef extern from ccallback.h).
 build_pyx "scipy._lib._ccallback_c" "$ND/scipy/_lib/_ccallback_c.pyx" || FAILED="$FAILED _ccallback_c"
-# _cytest: LowLevelCallable test-support module (test_c_api imports it)
-build_pyx "scipy.ndimage._cytest" "$NDSRC/_cytest.pyx" || FAILED="$FAILED _cytest"
+# _cytest: LowLevelCallable test-support module (test_c_api imports it).
+# "pxd" mode: bind the adjacent _cytest.pxd -> __pyx_capi__ exports.
+build_pyx "scipy.ndimage._cytest" "$NDSRC/_cytest.pyx" pxd || FAILED="$FAILED _cytest"
 
 # ---- _nd_image: 8 plain-C files. nd_image.c owns the array API import
 # (nd_image.h defines PY_ARRAY_UNIQUE_SYMBOL _scipy_ndimage_ARRAY_API); the
