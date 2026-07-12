@@ -1,3 +1,4 @@
 build/
 loader/brython/
 .wasthon/
+loader/data/

@@ -115,5 +115,9 @@ cp "$W"/build/numpy_vfs.js "$W"/build/pandas_vfs.js "$W"/build/scipy_ndimage_vfs
    "$W"/build/dateutil_zoneinfo_data.js "$HERE/build/"
 rm -rf "$HERE/loader/brython"
 cp -r "$W/loader/brython" "$HERE/loader/brython"
+# numpy.random's data-driven tests (test_direct) XHR ./data/*.csv relative to
+# the page: serve the pinned tree's test vectors as loader/data/
+mkdir -p "$HERE/loader/data"
+cp "$NP"/numpy/random/tests/data/*.csv "$NP"/numpy/random/tests/data/*.pkl.gz "$HERE/loader/data/"
 
 echo "=== done: build/{numpy_multiarray_umath,nprnd,npnd,nppd}.{mjs,wasm} + 4 VFS blobs + loader/brython ==="
