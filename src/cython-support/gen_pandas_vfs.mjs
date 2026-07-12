@@ -48,7 +48,7 @@ scripts['six'] = ['.py', fs.readFileSync(path.join(DEPS, 'six.py'), 'utf8'), [],
 n++;
 // browser stubs shipped with the repo (pandas imports them at module level
 // but never exercises them in the browser)
-for (const m of ['mmap', 'ctypes', 'tracemalloc']) {
+for (const m of ['mmap', 'ctypes', 'tracemalloc', 'zoneinfo']) {
   scripts[m] = ['.py', fs.readFileSync(path.join(HERE, 'pandas-stubs', m + '.py'), 'utf8'), [], false];
   n++;
 }

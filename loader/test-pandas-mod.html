@@ -57,8 +57,24 @@ class _Request:
     def getfixturevalue(self, name):
         return _call_fixture(self._mod, name, None)
 
+def _conftest():
+    global _CONFTEST
+    if _CONFTEST is None:
+        try:
+            import importlib
+            _CONFTEST = importlib.import_module("pandas.conftest")
+        except BaseException:
+            _CONFTEST = False
+    return _CONFTEST or None
+
+_CONFTEST = None
+
 def _call_fixture(mod, name, param):
     fn = getattr(mod, name, None)
+    if fn is None or not getattr(fn, "_pytest_fixture", False):
+        cf = _conftest()
+        if cf is not None:
+            fn = getattr(cf, name, fn)
     if fn is None or not callable(fn):
         raise AttributeError("fixture " + name + " not found in module")
     args = ()
@@ -83,6 +99,9 @@ def _fixture_cases(func, mod, cases):
                 c.setdefault("request", _Request(mod))
             continue
         fn = getattr(mod, name, None)
+        if fn is None or not getattr(fn, "_pytest_fixture", False):
+            cf = _conftest()
+            fn = getattr(cf, name, None) if cf is not None else None
         if fn is None or not getattr(fn, "_pytest_fixture", False):
             continue
         params = getattr(fn, "_pytest_fixture_params", None)
@@ -343,7 +362,7 @@ else:
     print("passed=" + str(_p))
     print("failed+errored=" + str(_f))
     print("skipped=" + str(_s))
-    for _m in _fails[:12]:
+    for _m in _fails[:400]:
         print("  FAIL " + _m)
 print("=== done ===")
 `;

@@ -3,6 +3,8 @@
 # SKIPS (the dashboard runner honors _pytest_skip), strategies are inert
 # factories so pandas._testing._hypothesis's shared strategies build fine.
 
+__version__ = "6.100.0"  # pandas/conftest.py version-gates its health checks
+
 
 class _S:
     """Inert strategy: absorbs any attribute/call/combinator."""
