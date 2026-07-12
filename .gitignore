@@ -2,3 +2,8 @@ build/
 loader/brython/
 .wasthon/
 loader/data/
+loader/cpython-tests/
+loader/test-cpython-all.html
+loader/test-cpython.html
+loader/brython-src.js
+loader/wasthon-*.js

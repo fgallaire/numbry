@@ -126,6 +126,11 @@ echo "=== seaborn (pure Python): combined numpy+pandas+mpl link -> build/npsb.mj
 bash "$W/cython-support/sblink.sh"
 node "$W/cython-support/gen_sb_vfs.mjs" "$SB/seaborn"
 
+echo "=== CPython suite dashboard: wasthon-full bundle (25 stdlib C modules) ==="
+# wasthon's own build.sh bootstraps its sources (CPython 3.14.6, expat, xz,
+# zstd…) and reuses the emsdk already installed in $W/external/emsdk.
+( cd "$W" && bash build.sh wasthon-full )
+
 echo "=== VFS blobs (numpy / pandas+tests / scipy+tests) ==="
 # a git-tag tree lacks the two meson-generated modules the numpy boot imports
 ( cd "$NP" && python3 numpy/_build_utils/gitversion.py --write numpy/version.py )
@@ -150,5 +155,14 @@ cp "$NP"/numpy/random/tests/data/*.csv "$NP"/numpy/random/tests/data/*.pkl.gz "$
 # scipy.ndimage test_measurements loadtxt's its label vectors the same way
 # (test-scipy.html's os.path.exists probe resolves them through Brython's open)
 cp "$SC"/scipy/ndimage/tests/data/label_*.txt "$HERE/loader/data/"
+# CPython suite dashboard: bundle + runner pages + helper scripts + the
+# Lib/test files, all straight from the wasthon clone (single source of truth)
+cp "$W/build/wasthon-full.mjs" "$W/build/wasthon-full.wasm" "$HERE/build/"
+cp "$W"/loader/test-cpython-all.html "$W"/loader/test-cpython.html \
+   "$W"/loader/brython-src.js "$W"/loader/wasthon-loader.js \
+   "$W"/loader/wasthon-io-write.js "$W"/loader/wasthon-fs.js \
+   "$W"/loader/wasthon-dealloc.js "$W"/loader/wasthon-dbm.js "$HERE/loader/"
+rm -rf "$HERE/loader/cpython-tests"
+cp -r "$W/loader/cpython-tests" "$HERE/loader/"
 
 echo "=== done: build/{numpy_multiarray_umath,nprnd,npnd,nppd}.{mjs,wasm} + 4 VFS blobs + loader/brython ==="
