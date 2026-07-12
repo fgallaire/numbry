@@ -48,7 +48,7 @@ scripts['six'] = ['.py', fs.readFileSync(path.join(DEPS, 'six.py'), 'utf8'), [],
 n++;
 // browser stubs shipped with the repo (pandas imports them at module level
 // but never exercises them in the browser)
-for (const m of ['mmap', 'ctypes']) {
+for (const m of ['mmap', 'ctypes', 'tracemalloc']) {
   scripts[m] = ['.py', fs.readFileSync(path.join(HERE, 'pandas-stubs', m + '.py'), 'utf8'), [], false];
   n++;
 }
@@ -59,6 +59,37 @@ n++;
 // dateutil.zoneinfo override: lazy zones from the build-extracted JS dict
 // instead of the 2-minute pure-Python tarfile walk (see untar below)
 scripts['dateutil.zoneinfo'] = ['.py', fs.readFileSync(path.join(HERE, 'pandas-stubs', 'dateutil_zoneinfo_init.py'), 'utf8'), [], true];
+// pytz: its Lazy* list/set wrappers (methods re-bound via setattr on the
+// class) come out EMPTY under Brython — `'US/Eastern' in all_timezones_set`
+// was False -> UnknownTimeZoneError — and its zoneinfo dir (binary TZif) is
+// not in the VFS anyway. Make every Lazy* call site eager and serve the data
+// from the same build-extracted zoneinfo dict as dateutil (identical IANA
+// TZif); resource_exists is a key test (no decode), the original construction
+// order then runs unchanged.
+{
+  const tzOverride = `# wasthon: zoneinfo from the page's build-extracted dict
+def open_resource(name):
+    import base64
+    from io import BytesIO
+    from browser import window
+    try:
+        return BytesIO(base64.b64decode(window.DATEUTIL_ZONEINFO[name]))
+    except Exception:
+        raise UnknownTimeZoneError(name)
+
+def resource_exists(name):
+    try:
+        from browser import window
+        return bool(window.DATEUTIL_ZONEINFO.hasOwnProperty(name))
+    except Exception:
+        return False
+
+`;
+  let ptz = scripts['pytz'][1];
+  ptz = ptz.replace('all_timezones = LazyList(', tzOverride + 'all_timezones = LazyList(');
+  ptz = ptz.split('LazyList(').join('list(').split('LazySet(').join('set(');
+  scripts['pytz'][1] = ptz;
+}
 // hypothesis stub (package + the two extra.* submodules
 // pandas._testing._hypothesis imports): @given tests -> skips.
 scripts['hypothesis'] = ['.py', fs.readFileSync(path.join(HERE, 'pandas-stubs', 'hypothesis.py'), 'utf8'), [], true];
