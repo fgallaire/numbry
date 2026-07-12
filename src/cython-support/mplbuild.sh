@@ -73,7 +73,13 @@ done
 VEOF
 
 NPINC="-I $W/numpy-probe/gen -I $W/numpy-probe -I $NP/numpy/_core/include -I $NP/numpy/_core/include/numpy -I $NP/numpy/_core/src/common"
-CXX="em++ -O1 -std=c++17 -c -DNPY_NO_DEPRECATED_API=0 -include $CS/pybind11_compat.h"
+# PY_ARRAY_UNIQUE_SYMBOL (upstream: one per extension, src/meson.build:174):
+# without it the NO_IMPORT_ARRAY TUs (py_converters, _backend_agg, ft2font)
+# bind `extern void **PyArray_API` to numpy-probe's global `void *PyArray_API[]`
+# with one indirection too many -> table-OOB on the first CAPI call
+# (convert_trans_affine in draw_path). One shared symbol for the whole module;
+# each wrapper's import_array() sets it through the _ARRAY_API capsule.
+CXX="em++ -O1 -std=c++17 -c -DNPY_NO_DEPRECATED_API=0 -DPY_ARRAY_UNIQUE_SYMBOL=MPL_npmpl_ARRAY_API -include $CS/pybind11_compat.h"
 FT="-sUSE_FREETYPE=1 -DFREETYPE_BUILD_TYPE=\"system\""
 
 FAILED=""
@@ -107,14 +113,14 @@ echo "compiled: $NOBJ objects; failed:${FAILED:- none}"
 
 # --- 3. link everything into ONE module with the numpy core so PyArray_API
 #        (matplotlib/kiwisolver only reference it) resolves at runtime. -------
-EXP='["_PyInit__multiarray_umath","_PyInit_ft2font","_PyInit__backend_agg","_PyInit__image","_PyInit__path","_PyInit__c_internal_utils","_PyInit__cext","_wasthon_init","_wasthon_module_create","_malloc","_free"]'
+EXP='["_PyInit__multiarray_umath","_PyInit__umath_linalg","_PyInit_ft2font","_PyInit__backend_agg","_PyInit__image","_PyInit__path","_PyInit__c_internal_utils","_PyInit__cext","_wasthon_init","_wasthon_module_create","_malloc","_free"]'
 emcc -O1 $FT \
-  "$W"/numpy-probe/obj/*.o "$W/build/nprnd-obj/tanh_stub.o" "$OUT"/*.o "$W/build/wasthon.o" \
+  "$W"/numpy-probe/obj/*.o "$W/build/nprnd-obj/tanh_stub.o" "$W"/build/linalg-obj/*.o "$OUT"/*.o "$W/build/wasthon.o" \
   --js-library "$SRC/wasthon.js" \
   -s ALLOW_MEMORY_GROWTH=1 -s ALLOW_TABLE_GROWTH=1 -sSTACK_SIZE=5242880 --profiling-funcs \
   -Wl,--allow-multiple-definition -s ERROR_ON_UNDEFINED_SYMBOLS=1 \
   -s EXPORTED_FUNCTIONS="$EXP" \
-  -s EXPORTED_RUNTIME_METHODS='["HEAPU8","HEAP32","UTF8ToString","stringToUTF8","lengthBytesUTF8","wasmTable"]' \
+  -s EXPORTED_RUNTIME_METHODS='["HEAPU8","HEAP32","UTF8ToString","stringToUTF8","lengthBytesUTF8","wasmTable","FS"]' \
   -s MODULARIZE=1 -s EXPORT_ES6=1 -s EXPORT_NAME=npmpl \
   -o "$W/build/npmpl.mjs" || { echo "LINK FAILED"; exit 1; }
 echo "built build/npmpl.{mjs,wasm}  ($(du -h "$W/build/npmpl.wasm" | cut -f1))"

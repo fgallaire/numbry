@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Wasthon — matplotlib smoke test</title>
+<script src="./brython/brython.js"></script>
+<script src="./brython/brython_stdlib.js"></script>
+<!-- numpy's Python layer + LAPACK stub + pytest shim, as a Brython VFS -->
+<script src="../build/numpy_vfs.js"></script>
+<!-- matplotlib's Python layer + cycler/pyparsing/packaging/dateutil/six +
+     kiwisolver py + the PIL/plistlib stubs, plus window.MPL_DATA
+     (matplotlibrc + DejaVu fonts, base64) -->
+<script src="../build/mpl_vfs.js"></script>
+</head>
+<body>
+<p style="font-size:0.85em;margin:0 0 1em 0;"><a href="index.html">← back to index</a></p>
+<h1>Wasthon — matplotlib smoke test</h1>
+<p style="color:#666;font-size:0.9em;max-width:70ch;">
+  Imports <b>matplotlib 3.9.2</b> — the real thing: the Agg C++ renderer,
+  FreeType text and kiwisolver compiled to wasm (plus numpy's C core) — draws
+  a figure entirely in the browser and blits <code>buffer_rgba()</code> onto
+  the canvas below.
+</p>
+<canvas id="plot" style="border:1px solid #ccc;max-width:100%;"></canvas>
+<pre id="log" style="background:#f4f4f4;padding:1em;font-size:13px;line-height:1.4;"></pre>
+
+<script type="text/x-mpl-smoke" id="preamble">
+import sys, os, builtins, base64, io
+
+# --- browser preamble: what CPython-on-an-OS provides and Brython can't ---
+# VFS modules have no source files: linecache must return nothing instead of
+# fetching module paths over XHR (pyparsing's _trim_arity walks the stack at
+# import and pulls source lines through linecache/tokenize.open).
+import linecache
+linecache.getline = lambda *a, **k: ""
+linecache.getlines = lambda *a, **k: []
+if not hasattr(sys, "is_finalizing"):
+    sys.is_finalizing = lambda: False
+os.environ["MPLCONFIGDIR"] = "/mplcfg"
+os.mkdir = lambda *a, **k: None
+os.makedirs = lambda *a, **k: None
+for _a in ("errno", "strerror", "filename", "filename2"):
+    if not hasattr(OSError, _a):
+        try:
+            setattr(OSError, _a, None)
+        except BaseException:
+            pass
+
+from browser import window
+
+# mpl-data assets (matplotlibrc, DejaVu fonts) come from window.MPL_DATA;
+# ft2font opens font files through Python open(), so overriding builtins.open
+# is all FreeType needs.
+_orig_open = builtins.open
+
+def _mpl_open(name, mode="r", *a, **k):
+    key = str(name).replace("\\", "/")
+    i = key.find("mpl-data/")
+    if i >= 0:
+        sub = key[i + len("mpl-data/"):]
+        if window.MPL_DATA.hasOwnProperty(sub):
+            raw = base64.b64decode(window.MPL_DATA[sub])
+            if "b" in mode:
+                f = io.BytesIO(raw)
+            else:
+                f = io.StringIO(raw.decode("utf-8"))
+            f.name = key
+            return f
+    return _orig_open(name, mode, *a, **k)
+
+builtins.open = _mpl_open
+
+# font_manager scans directories with os.walk / os.path.exists — serve the
+# embedded font list for the mpl-data path, nothing for OS font dirs.
+import os.path as _osp
+
+def _walk(top, *a, **k):
+    top = str(top).replace("\\", "/")
+    if "mpl-data/fonts" in top and top.endswith("ttf"):
+        yield top, [], list(window.MPL_FONTS)
+    return
+
+def _isfile(p):
+    key = str(p).replace("\\", "/")
+    i = key.find("mpl-data/")
+    return i >= 0 and bool(window.MPL_DATA.hasOwnProperty(key[i + len("mpl-data/"):]))
+
+os.walk = _walk
+_osp.isfile = _isfile
+_osp.exists = lambda p: _isfile(p)
+_osp.isdir = lambda p: False
+
+try:
+    import subprocess
+    def _no_subprocess(*a, **k):
+        raise OSError("subprocess not available in the browser")
+    subprocess.check_output = _no_subprocess
+    subprocess.run = _no_subprocess
+    subprocess.Popen = _no_subprocess
+except ImportError:
+    pass
+
+</script>
+
+<script type="text/x-mpl-smoke" id="smoke">
+# --- the smoke itself ---
+import numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.backends.backend_agg  # pre-warm: importlib bypasses the page hook
+import matplotlib.pyplot as plt
+print("import matplotlib OK, version " + matplotlib.__version__)
+
+x = np.linspace(0.0, 2.0 * np.pi, 100)
+fig, ax = plt.subplots(figsize=(4.8, 3.2), dpi=100)
+ax.plot(x, np.sin(x), label="sin(x)")
+ax.plot(x, np.cos(x), "--", label="cos(x)")
+ax.set_title("matplotlib 3.9.2 / Agg, rendered in wasm")
+ax.set_xlabel("x")
+ax.set_ylabel("y")
+ax.legend(loc="lower left")
+ax.grid(True)
+fig.canvas.draw()
+buf = fig.canvas.buffer_rgba()
+data = bytes(buf)
+W, H = fig.canvas.get_width_height()
+nonwhite = 0
+for i in range(0, len(data), 4):
+    if data[i] != 255 or data[i + 1] != 255 or data[i + 2] != 255:
+        nonwhite += 1
+print("rendered " + str(W) + "x" + str(H) + " RGBA, " + str(len(data))
+      + " bytes, " + str(nonwhite) + " non-white px")
+</script>
+
+<script type="module">
+const logEl = document.getElementById('log');
+const log = (s) => { logEl.textContent += s + '\n'; };
+
+const $B = window.__BRYTHON__;
+globalThis.$B = $B;
+globalThis.__BRYTHON__ = $B;
+globalThis._b_ = $B.builtins;
+
+// C extension modules living in the combined wasm -> their PyInit export.
+const MPL_C = {
+  'matplotlib._c_internal_utils':     '_PyInit__c_internal_utils',
+  'matplotlib.ft2font':               '_PyInit_ft2font',
+  'matplotlib._path':                 '_PyInit__path',
+  'matplotlib.backends._backend_agg': '_PyInit__backend_agg',
+  'kiwisolver._cext':                 '_PyInit__cext',
+  'numpy.linalg._umath_linalg':       '_PyInit__umath_linalg',
+};
+
+try {
+  log('loading combined numpy + matplotlib + kiwisolver wasm…');
+  const factory = (await import('../build/npmpl.mjs')).default;
+  const M = await factory();
+  M._wasthon_init();
+
+  function runMA() {
+    const name = 'numpy._core._multiarray_umath';
+    if ($B.imported[name] !== undefined) return;
+    const def = M._PyInit__multiarray_umath();
+    const cmod = M._wasthon_module_create(def);
+    if (cmod !== 0) {
+      $B.imported[name] = M.wasthon.handles.get(cmod);
+      try { $B.str_dict_set($B.get_dict($B.imported['numpy._core']), '_multiarray_umath', $B.imported[name]); } catch(e){}
+    }
+  }
+
+  const orig = $B.$__import__;
+  function runC(fullname, pyinit) {
+    if ($B.imported[fullname] !== undefined) return true;
+    const parts = fullname.split('.');
+    const parent = parts.slice(0, -1).join('.');
+    if (parent && $B.imported[parent] === undefined) {
+      try { orig(parent, {}, {}, [], 0); } catch(e){}
+    }
+    if ($B.imported[fullname] !== undefined) return true;  // parent exec imported us
+    const def = M[pyinit]();
+    if (def === 0) { log('  [C] ' + fullname + ' PyInit returned NULL'); return false; }
+    let mod = null;
+    try { if (!M.wasthon.moduleDefs.get(def)) mod = M.wasthon.handles.get(def); } catch(e){}
+    if (!mod) {
+      try { const di = M.wasthon.moduleDefs.get(def); if (di) di.name = fullname; } catch(e){}
+      const cmod = M._wasthon_module_create(def);
+      if (cmod === 0) {
+        const pe = M.wasthon && M.wasthon.pendingException;
+        let pm = '(silent)';
+        if (pe) {
+          try { pm = String(_b_.str.$factory(pe.value || pe.msg)); } catch(e) { pm = String(pe.msg); }
+          try { pm = ($B.class_name(pe.value || M.wasthon.unwrap(pe.exc)) || '') + ': ' + pm; } catch(e){}
+        }
+        log('  [C] ' + fullname + ' init FAILED: ' + String(pm).slice(0, 200));
+        return false;
+      }
+      mod = M.wasthon.handles.get(cmod);
+    } else {
+      try { $B.str_dict_set($B.get_dict(mod), '__name__', fullname); } catch(e){}
+    }
+    $B.imported[fullname] = mod;
+    if (parent) { try { $B.str_dict_set($B.get_dict($B.imported[parent]), parts[parts.length - 1], mod); } catch(e){} }
+    return true;
+  }
+
+  $B.$__import__ = function(mod_name, globals, locals, fromlist, level) {
+    try {
+      if (level > 0 && typeof mod_name === 'string' && mod_name) {
+        for (const pref of ['matplotlib.backends.', 'matplotlib.', 'kiwisolver.']) {
+          const pabs = pref + mod_name;
+          if (MPL_C[pabs]) { runC(pabs, MPL_C[pabs]); if ($B.imported[pabs]) return $B.imported[pabs]; }
+        }
+      }
+      if (typeof mod_name === 'string') {
+        if (mod_name === 'numpy._core._multiarray_umath') runMA();
+        if (MPL_C[mod_name]) runC(mod_name, MPL_C[mod_name]);
+        if (fromlist && fromlist.length) for (const f of fromlist) {
+          try {
+            const sub = mod_name + '.' + (typeof f === 'string' ? f : $B.$getattr(f, '__name__', f));
+            if (mod_name === 'numpy._core' && sub === 'numpy._core._multiarray_umath') runMA();
+            if (MPL_C[sub]) runC(sub, MPL_C[sub]);
+          } catch(e){}
+        }
+      }
+    } catch(e) { console.warn('import hook:', e); }
+    return orig.apply(this, arguments);
+  };
+
+  const preSrc = document.getElementById('preamble').textContent;
+  const smokeSrc = document.getElementById('smoke').textContent;
+  const origConsole = console.log;
+  console.log = (...a) => { logEl.textContent += a.map(x => typeof x === 'string' ? x : String(x)).join(' '); };
+  const t0 = performance.now();
+  try {
+    $B.runPythonSource(preSrc, 'mpl_preamble');
+    // the C side (ft2font) fetches `open` through PyEval_GetBuiltins — push
+    // the preamble's override into every dict that call may return
+    try {
+      const bmod = $B.imported['builtins'] || _b_.__builtins__;
+      const ov = $B.$getattr(bmod, 'open');
+      if (_b_.__builtins__) $B.str_dict_set($B.get_dict(_b_.__builtins__), 'open', ov);
+      if ($B.builtins_dict) $B.str_dict_set($B.builtins_dict, 'open', ov);
+      _b_.open = ov;
+    } catch(e) { console.warn('open push failed:', e); }
+    $B.runPythonSource(smokeSrc, 'mpl_smoke');
+  }
+  finally { console.log = origConsole; }
+  log('(' + (performance.now() - t0).toFixed(0) + ' ms)');
+
+  // blit the rendered RGBA buffer onto the canvas
+  try {
+    const main = $B.imported['mpl_smoke'] || $B.imported['__main__'];
+    const d = $B.get_dict(main);
+    const g = (k) => $B.str_dict_get ? $B.str_dict_get(d, k) : $B.$getitem(d, k);
+    const data = g('data'), W = g('W'), H = g('H');
+    const src = data.source || data;
+    const cv = document.getElementById('plot');
+    cv.width = W; cv.height = H;
+    const img = new ImageData(new Uint8ClampedArray(src), W, H);
+    cv.getContext('2d').putImageData(img, 0, 0);
+    log('canvas blitted: ' + W + 'x' + H);
+  } catch(e) {
+    log('canvas blit FAILED: ' + (e.message || e));
+    console.error(e);
+  }
+  log('=== done ===');
+} catch(e) {
+  log('BOOT FAILED: ' + (e && (e.args ? String(e.args[0]) : (e.stack || e.message || e))));
+  try {
+    let tb = e && e.__traceback__, n = 0;
+    while (tb && n < 20) {
+      const fr = tb.tb_frame;
+      log('  TB ' + (fr ? (String(fr[0]) + ' @ ' + String(fr[2])) : '?') + ' line ' + String(tb.tb_lineno));
+      tb = tb.tb_next; n++;
+    }
+  } catch(te) {}
+  log('=== done ===');
+  console.error(e);
+}
+</script>
+</body>
+</html>

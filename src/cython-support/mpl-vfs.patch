@@ -1,0 +1,1391 @@
+diff -ru '--exclude=__pycache__' a/_afm.py b/_afm.py
+--- a/_afm.py	2026-07-12 15:38:51.477154299 +0200
++++ b/_afm.py	2026-07-12 15:38:51.525837801 +0200
+@@ -230,7 +230,7 @@
+         if name == 'Euro':
+             num = 128
+         elif name == 'minus':
+-            num = ord("\N{MINUS SIGN}")  # 0x2212
++            num = ord("−")  # 0x2212
+         if num != -1:
+             ascii_d[num] = metrics
+         name_d[name] = metrics
+diff -ru '--exclude=__pycache__' a/backends/backend_gtk3.py b/backends/backend_gtk3.py
+--- a/backends/backend_gtk3.py	2026-07-12 15:38:51.478590305 +0200
++++ b/backends/backend_gtk3.py	2026-07-12 15:38:51.527050746 +0200
+@@ -322,7 +322,7 @@
+         self.insert(toolitem, -1)
+         label = Gtk.Label()
+         label.set_markup(
+-            '<small>\N{NO-BREAK SPACE}\n\N{NO-BREAK SPACE}</small>')
++            '<small> \n </small>')
+         toolitem.set_expand(True)  # Push real message to the right.
+         toolitem.add(label)
+ 
+diff -ru '--exclude=__pycache__' a/backends/backend_gtk4.py b/backends/backend_gtk4.py
+--- a/backends/backend_gtk4.py	2026-07-12 15:38:51.478630360 +0200
++++ b/backends/backend_gtk4.py	2026-07-12 15:38:51.527073569 +0200
+@@ -314,7 +314,7 @@
+         # toolbar.
+         label = Gtk.Label()
+         label.set_markup(
+-            '<small>\N{NO-BREAK SPACE}\n\N{NO-BREAK SPACE}</small>')
++            '<small> \n </small>')
+         label.set_hexpand(True)  # Push real message to the right.
+         self.append(label)
+ 
+@@ -407,7 +407,7 @@
+         # toolbar.
+         label = Gtk.Label()
+         label.set_markup(
+-            '<small>\N{NO-BREAK SPACE}\n\N{NO-BREAK SPACE}</small>')
++            '<small> \n </small>')
+         label.set_hexpand(True)  # Push real message to the right.
+         self.append(label)
+ 
+diff -ru '--exclude=__pycache__' a/backends/backend_pgf.py b/backends/backend_pgf.py
+--- a/backends/backend_pgf.py	2026-07-12 15:38:51.478770895 +0200
++++ b/backends/backend_pgf.py	2026-07-12 15:38:51.527156656 +0200
+@@ -72,7 +72,7 @@
+     Do some necessary and/or useful substitutions for texts to be included in
+     LaTeX documents.
+     """
+-    return text.replace("\N{MINUS SIGN}", r"\ensuremath{-}")
++    return text.replace("−", r"\ensuremath{-}")
+ 
+ 
+ def _writeln(fh, line):
+diff -ru '--exclude=__pycache__' a/backends/_backend_tk.py b/backends/_backend_tk.py
+--- a/backends/_backend_tk.py	2026-07-12 15:38:51.478511416 +0200
++++ b/backends/_backend_tk.py	2026-07-12 15:38:51.526996203 +0200
+@@ -637,7 +637,7 @@
+         # over images because those use two-line messages which resize the
+         # toolbar.
+         label = tk.Label(master=self, font=self._label_font,
+-                         text='\N{NO-BREAK SPACE}\n\N{NO-BREAK SPACE}')
++                         text=' \n ')
+         label.pack(side=tk.RIGHT)
+ 
+         self.message = tk.StringVar(master=self)
+@@ -956,7 +956,7 @@
+         # over images because those use two-line messages which resize the
+         # toolbar.
+         label = tk.Label(master=self, font=self._label_font,
+-                         text='\N{NO-BREAK SPACE}\n\N{NO-BREAK SPACE}')
++                         text=' \n ')
+         label.pack(side=tk.RIGHT)
+         self._message = tk.StringVar(master=self)
+         self._message_label = tk.Label(master=self, font=self._label_font,
+diff -ru '--exclude=__pycache__' a/font_manager.py b/font_manager.py
+--- a/font_manager.py	2026-07-12 15:38:51.480264870 +0200
++++ b/font_manager.py	2026-07-12 15:38:51.527872224 +0200
+@@ -1580,7 +1580,10 @@
+                 _log.debug("Using fontManager instance from %s", fm_path)
+                 return fm
+     fm = FontManager()
+-    json_dump(fm, fm_path)
++    try:
++        json_dump(fm, fm_path)
++    except BaseException:
++        pass  # wasthon: read-only FS, cache stays in memory
+     _log.info("generated new fontManager")
+     return fm
+ 
+diff -ru '--exclude=__pycache__' a/__init__.py b/__init__.py
+--- a/__init__.py	2026-07-12 15:38:51.477070872 +0200
++++ b/__init__.py	2026-07-12 15:38:51.525791213 +0200
+@@ -215,7 +215,7 @@
+     # a matplotlib git repo but not in a shallow clone, such as those used by
+     # CI, as the latter would trigger a warning from setuptools_scm.
+     root = Path(__file__).resolve().parents[2]
+-    if ((root / ".matplotlib-repo").exists()
++    if False and ((root / ".matplotlib-repo").exists()
+             and (root / ".git").exists()
+             and not (root / ".git/shallow").exists()):
+         try:
+@@ -242,6 +242,7 @@
+ 
+ 
+ def _check_versions():
++    return  # wasthon: Brython re crashes on unmatched named groups (packaging.version)
+ 
+     # Quickfix to ensure Microsoft Visual C++ redistributable
+     # DLLs are loaded before importing kiwisolver
+@@ -518,7 +519,7 @@
+ def _get_config_or_cache_dir(xdg_base_getter):
+     configdir = os.environ.get('MPLCONFIGDIR')
+     if configdir:
+-        configdir = Path(configdir).resolve()
++        return configdir  # wasthon: trust MPLCONFIGDIR (browser/node: no os.access)
+     elif sys.platform.startswith(('linux', 'freebsd')):
+         # Only call _xdg_base_getter here so that MPLCONFIGDIR is tried first,
+         # as _xdg_base_getter can throw.
+diff -ru '--exclude=__pycache__' a/_mathtext_data.py b/_mathtext_data.py
+--- a/_mathtext_data.py	2026-07-12 15:38:51.477613434 +0200
++++ b/_mathtext_data.py	2026-07-12 15:38:51.526245369 +0200
+@@ -135,7 +135,7 @@
+     ']'                          : ('cmr10', 0x5d),
+ 
+     '*'                          : ('cmsy10', 0xa4),
+-    '\N{MINUS SIGN}'             : ('cmsy10', 0xa1),
++    '−'             : ('cmsy10', 0xa1),
+     '\\Downarrow'                : ('cmsy10', 0x2b),
+     '\\Im'                       : ('cmsy10', 0x3d),
+     '\\Leftarrow'                : ('cmsy10', 0x28),
+@@ -1120,587 +1120,587 @@
+     str, list[_EntryTypeIn]], list[_EntryTypeIn]]] = {
+     'bb': {
+         "rm": [
+-            ("\N{DIGIT ZERO}",
+-             "\N{DIGIT NINE}",
++            ("0",
++             "9",
+              "rm",
+-             "\N{MATHEMATICAL DOUBLE-STRUCK DIGIT ZERO}"),
+-            ("\N{LATIN CAPITAL LETTER A}",
+-             "\N{LATIN CAPITAL LETTER B}",
+-             "rm",
+-             "\N{MATHEMATICAL DOUBLE-STRUCK CAPITAL A}"),
+-            ("\N{LATIN CAPITAL LETTER C}",
+-             "\N{LATIN CAPITAL LETTER C}",
+-             "rm",
+-             "\N{DOUBLE-STRUCK CAPITAL C}"),
+-            ("\N{LATIN CAPITAL LETTER D}",
+-             "\N{LATIN CAPITAL LETTER G}",
+-             "rm",
+-             "\N{MATHEMATICAL DOUBLE-STRUCK CAPITAL D}"),
+-            ("\N{LATIN CAPITAL LETTER H}",
+-             "\N{LATIN CAPITAL LETTER H}",
+-             "rm",
+-             "\N{DOUBLE-STRUCK CAPITAL H}"),
+-            ("\N{LATIN CAPITAL LETTER I}",
+-             "\N{LATIN CAPITAL LETTER M}",
+-             "rm",
+-             "\N{MATHEMATICAL DOUBLE-STRUCK CAPITAL I}"),
+-            ("\N{LATIN CAPITAL LETTER N}",
+-             "\N{LATIN CAPITAL LETTER N}",
+-             "rm",
+-             "\N{DOUBLE-STRUCK CAPITAL N}"),
+-            ("\N{LATIN CAPITAL LETTER O}",
+-             "\N{LATIN CAPITAL LETTER O}",
+-             "rm",
+-             "\N{MATHEMATICAL DOUBLE-STRUCK CAPITAL O}"),
+-            ("\N{LATIN CAPITAL LETTER P}",
+-             "\N{LATIN CAPITAL LETTER Q}",
+-             "rm",
+-             "\N{DOUBLE-STRUCK CAPITAL P}"),
+-            ("\N{LATIN CAPITAL LETTER R}",
+-             "\N{LATIN CAPITAL LETTER R}",
+-             "rm",
+-             "\N{DOUBLE-STRUCK CAPITAL R}"),
+-            ("\N{LATIN CAPITAL LETTER S}",
+-             "\N{LATIN CAPITAL LETTER Y}",
+-             "rm",
+-             "\N{MATHEMATICAL DOUBLE-STRUCK CAPITAL S}"),
+-            ("\N{LATIN CAPITAL LETTER Z}",
+-             "\N{LATIN CAPITAL LETTER Z}",
+-             "rm",
+-             "\N{DOUBLE-STRUCK CAPITAL Z}"),
+-            ("\N{LATIN SMALL LETTER A}",
+-             "\N{LATIN SMALL LETTER Z}",
+-             "rm",
+-             "\N{MATHEMATICAL DOUBLE-STRUCK SMALL A}"),
+-            ("\N{GREEK CAPITAL LETTER GAMMA}",
+-             "\N{GREEK CAPITAL LETTER GAMMA}",
+-             "rm",
+-             "\N{DOUBLE-STRUCK CAPITAL GAMMA}"),
+-            ("\N{GREEK CAPITAL LETTER PI}",
+-             "\N{GREEK CAPITAL LETTER PI}",
+-             "rm",
+-             "\N{DOUBLE-STRUCK CAPITAL PI}"),
+-            ("\N{GREEK CAPITAL LETTER SIGMA}",
+-             "\N{GREEK CAPITAL LETTER SIGMA}",
+-             "rm",
+-             "\N{DOUBLE-STRUCK N-ARY SUMMATION}"),
+-            ("\N{GREEK SMALL LETTER GAMMA}",
+-             "\N{GREEK SMALL LETTER GAMMA}",
+-             "rm",
+-             "\N{DOUBLE-STRUCK SMALL GAMMA}"),
+-            ("\N{GREEK SMALL LETTER PI}",
+-             "\N{GREEK SMALL LETTER PI}",
++             "𝟘"),
++            ("A",
++             "B",
++             "rm",
++             "𝔸"),
++            ("C",
++             "C",
++             "rm",
++             "ℂ"),
++            ("D",
++             "G",
++             "rm",
++             "𝔻"),
++            ("H",
++             "H",
++             "rm",
++             "ℍ"),
++            ("I",
++             "M",
++             "rm",
++             "𝕀"),
++            ("N",
++             "N",
++             "rm",
++             "ℕ"),
++            ("O",
++             "O",
++             "rm",
++             "𝕆"),
++            ("P",
++             "Q",
++             "rm",
++             "ℙ"),
++            ("R",
++             "R",
++             "rm",
++             "ℝ"),
++            ("S",
++             "Y",
++             "rm",
++             "𝕊"),
++            ("Z",
++             "Z",
++             "rm",
++             "ℤ"),
++            ("a",
++             "z",
++             "rm",
++             "𝕒"),
++            ("Γ",
++             "Γ",
++             "rm",
++             "ℾ"),
++            ("Π",
++             "Π",
++             "rm",
++             "ℿ"),
++            ("Σ",
++             "Σ",
++             "rm",
++             "⅀"),
++            ("γ",
++             "γ",
++             "rm",
++             "ℽ"),
++            ("π",
++             "π",
+              "rm",
+-             "\N{DOUBLE-STRUCK SMALL PI}"),
++             "ℼ"),
+         ],
+         "it": [
+-            ("\N{DIGIT ZERO}",
+-             "\N{DIGIT NINE}",
++            ("0",
++             "9",
+              "rm",
+-             "\N{MATHEMATICAL DOUBLE-STRUCK DIGIT ZERO}"),
+-            ("\N{LATIN CAPITAL LETTER A}",
+-             "\N{LATIN CAPITAL LETTER B}",
++             "𝟘"),
++            ("A",
++             "B",
+              "it",
+              0xe154),
+-            ("\N{LATIN CAPITAL LETTER C}",
+-             "\N{LATIN CAPITAL LETTER C}",
++            ("C",
++             "C",
+              "it",
+-             "\N{DOUBLE-STRUCK CAPITAL C}"),
+-            ("\N{LATIN CAPITAL LETTER D}",
+-             "\N{LATIN CAPITAL LETTER D}",
+-             "it",
+-             "\N{DOUBLE-STRUCK ITALIC CAPITAL D}"),
+-            ("\N{LATIN CAPITAL LETTER E}",
+-             "\N{LATIN CAPITAL LETTER G}",
++             "ℂ"),
++            ("D",
++             "D",
++             "it",
++             "ⅅ"),
++            ("E",
++             "G",
+              "it",
+              0xe156),
+-            ("\N{LATIN CAPITAL LETTER H}",
+-             "\N{LATIN CAPITAL LETTER H}",
++            ("H",
++             "H",
+              "it",
+-             "\N{DOUBLE-STRUCK CAPITAL H}"),
+-            ("\N{LATIN CAPITAL LETTER I}",
+-             "\N{LATIN CAPITAL LETTER M}",
++             "ℍ"),
++            ("I",
++             "M",
+              "it",
+              0xe159),
+-            ("\N{LATIN CAPITAL LETTER N}",
+-             "\N{LATIN CAPITAL LETTER N}",
++            ("N",
++             "N",
+              "it",
+-             "\N{DOUBLE-STRUCK CAPITAL N}"),
+-            ("\N{LATIN CAPITAL LETTER O}",
+-             "\N{LATIN CAPITAL LETTER O}",
++             "ℕ"),
++            ("O",
++             "O",
+              "it",
+              0xe15e),
+-            ("\N{LATIN CAPITAL LETTER P}",
+-             "\N{LATIN CAPITAL LETTER Q}",
++            ("P",
++             "Q",
+              "it",
+-             "\N{DOUBLE-STRUCK CAPITAL P}"),
+-            ("\N{LATIN CAPITAL LETTER R}",
+-             "\N{LATIN CAPITAL LETTER R}",
+-             "it",
+-             "\N{DOUBLE-STRUCK CAPITAL R}"),
+-            ("\N{LATIN CAPITAL LETTER S}",
+-             "\N{LATIN CAPITAL LETTER Y}",
++             "ℙ"),
++            ("R",
++             "R",
++             "it",
++             "ℝ"),
++            ("S",
++             "Y",
+              "it",
+              0xe15f),
+-            ("\N{LATIN CAPITAL LETTER Z}",
+-             "\N{LATIN CAPITAL LETTER Z}",
++            ("Z",
++             "Z",
+              "it",
+-             "\N{DOUBLE-STRUCK CAPITAL Z}"),
+-            ("\N{LATIN SMALL LETTER A}",
+-             "\N{LATIN SMALL LETTER C}",
++             "ℤ"),
++            ("a",
++             "c",
+              "it",
+              0xe166),
+-            ("\N{LATIN SMALL LETTER D}",
+-             "\N{LATIN SMALL LETTER E}",
++            ("d",
++             "e",
+              "it",
+-             "\N{DOUBLE-STRUCK ITALIC SMALL D}"),
+-            ("\N{LATIN SMALL LETTER F}",
+-             "\N{LATIN SMALL LETTER H}",
++             "ⅆ"),
++            ("f",
++             "h",
+              "it",
+              0xe169),
+-            ("\N{LATIN SMALL LETTER I}",
+-             "\N{LATIN SMALL LETTER J}",
++            ("i",
++             "j",
+              "it",
+-             "\N{DOUBLE-STRUCK ITALIC SMALL I}"),
+-            ("\N{LATIN SMALL LETTER K}",
+-             "\N{LATIN SMALL LETTER Z}",
++             "ⅈ"),
++            ("k",
++             "z",
+              "it",
+              0xe16c),
+-            ("\N{GREEK CAPITAL LETTER GAMMA}",
+-             "\N{GREEK CAPITAL LETTER GAMMA}",
++            ("Γ",
++             "Γ",
+              "it",
+-             "\N{DOUBLE-STRUCK CAPITAL GAMMA}"),  # \Gamma (not in beta STIX fonts)
+-            ("\N{GREEK CAPITAL LETTER PI}",
+-             "\N{GREEK CAPITAL LETTER PI}",
+-             "it",
+-             "\N{DOUBLE-STRUCK CAPITAL PI}"),
+-            ("\N{GREEK CAPITAL LETTER SIGMA}",
+-             "\N{GREEK CAPITAL LETTER SIGMA}",
+-             "it",
+-             "\N{DOUBLE-STRUCK N-ARY SUMMATION}"),  # \Sigma (not in beta STIX fonts)
+-            ("\N{GREEK SMALL LETTER GAMMA}",
+-             "\N{GREEK SMALL LETTER GAMMA}",
+-             "it",
+-             "\N{DOUBLE-STRUCK SMALL GAMMA}"),  # \gamma (not in beta STIX fonts)
+-            ("\N{GREEK SMALL LETTER PI}",
+-             "\N{GREEK SMALL LETTER PI}",
++             "ℾ"),  # \Gamma (not in beta STIX fonts)
++            ("Π",
++             "Π",
++             "it",
++             "ℿ"),
++            ("Σ",
++             "Σ",
++             "it",
++             "⅀"),  # \Sigma (not in beta STIX fonts)
++            ("γ",
++             "γ",
++             "it",
++             "ℽ"),  # \gamma (not in beta STIX fonts)
++            ("π",
++             "π",
+              "it",
+-             "\N{DOUBLE-STRUCK SMALL PI}"),
++             "ℼ"),
+         ],
+         "bf": [
+-            ("\N{DIGIT ZERO}",
+-             "\N{DIGIT NINE}",
++            ("0",
++             "9",
+              "rm",
+-             "\N{MATHEMATICAL DOUBLE-STRUCK DIGIT ZERO}"),
+-            ("\N{LATIN CAPITAL LETTER A}",
+-             "\N{LATIN CAPITAL LETTER B}",
++             "𝟘"),
++            ("A",
++             "B",
+              "bf",
+              0xe38a),
+-            ("\N{LATIN CAPITAL LETTER C}",
+-             "\N{LATIN CAPITAL LETTER C}",
++            ("C",
++             "C",
+              "bf",
+-             "\N{DOUBLE-STRUCK CAPITAL C}"),
+-            ("\N{LATIN CAPITAL LETTER D}",
+-             "\N{LATIN CAPITAL LETTER D}",
+-             "bf",
+-             "\N{DOUBLE-STRUCK ITALIC CAPITAL D}"),
+-            ("\N{LATIN CAPITAL LETTER E}",
+-             "\N{LATIN CAPITAL LETTER G}",
++             "ℂ"),
++            ("D",
++             "D",
++             "bf",
++             "ⅅ"),
++            ("E",
++             "G",
+              "bf",
+              0xe38d),
+-            ("\N{LATIN CAPITAL LETTER H}",
+-             "\N{LATIN CAPITAL LETTER H}",
++            ("H",
++             "H",
+              "bf",
+-             "\N{DOUBLE-STRUCK CAPITAL H}"),
+-            ("\N{LATIN CAPITAL LETTER I}",
+-             "\N{LATIN CAPITAL LETTER M}",
++             "ℍ"),
++            ("I",
++             "M",
+              "bf",
+              0xe390),
+-            ("\N{LATIN CAPITAL LETTER N}",
+-             "\N{LATIN CAPITAL LETTER N}",
++            ("N",
++             "N",
+              "bf",
+-             "\N{DOUBLE-STRUCK CAPITAL N}"),
+-            ("\N{LATIN CAPITAL LETTER O}",
+-             "\N{LATIN CAPITAL LETTER O}",
++             "ℕ"),
++            ("O",
++             "O",
+              "bf",
+              0xe395),
+-            ("\N{LATIN CAPITAL LETTER P}",
+-             "\N{LATIN CAPITAL LETTER Q}",
++            ("P",
++             "Q",
+              "bf",
+-             "\N{DOUBLE-STRUCK CAPITAL P}"),
+-            ("\N{LATIN CAPITAL LETTER R}",
+-             "\N{LATIN CAPITAL LETTER R}",
+-             "bf",
+-             "\N{DOUBLE-STRUCK CAPITAL R}"),
+-            ("\N{LATIN CAPITAL LETTER S}",
+-             "\N{LATIN CAPITAL LETTER Y}",
++             "ℙ"),
++            ("R",
++             "R",
++             "bf",
++             "ℝ"),
++            ("S",
++             "Y",
+              "bf",
+              0xe396),
+-            ("\N{LATIN CAPITAL LETTER Z}",
+-             "\N{LATIN CAPITAL LETTER Z}",
++            ("Z",
++             "Z",
+              "bf",
+-             "\N{DOUBLE-STRUCK CAPITAL Z}"),
+-            ("\N{LATIN SMALL LETTER A}",
+-             "\N{LATIN SMALL LETTER C}",
++             "ℤ"),
++            ("a",
++             "c",
+              "bf",
+              0xe39d),
+-            ("\N{LATIN SMALL LETTER D}",
+-             "\N{LATIN SMALL LETTER E}",
++            ("d",
++             "e",
+              "bf",
+-             "\N{DOUBLE-STRUCK ITALIC SMALL D}"),
+-            ("\N{LATIN SMALL LETTER F}",
+-             "\N{LATIN SMALL LETTER H}",
++             "ⅆ"),
++            ("f",
++             "h",
+              "bf",
+              0xe3a2),
+-            ("\N{LATIN SMALL LETTER I}",
+-             "\N{LATIN SMALL LETTER J}",
++            ("i",
++             "j",
+              "bf",
+-             "\N{DOUBLE-STRUCK ITALIC SMALL I}"),
+-            ("\N{LATIN SMALL LETTER K}",
+-             "\N{LATIN SMALL LETTER Z}",
++             "ⅈ"),
++            ("k",
++             "z",
+              "bf",
+              0xe3a7),
+-            ("\N{GREEK CAPITAL LETTER GAMMA}",
+-             "\N{GREEK CAPITAL LETTER GAMMA}",
++            ("Γ",
++             "Γ",
+              "bf",
+-             "\N{DOUBLE-STRUCK CAPITAL GAMMA}"),
+-            ("\N{GREEK CAPITAL LETTER PI}",
+-             "\N{GREEK CAPITAL LETTER PI}",
+-             "bf",
+-             "\N{DOUBLE-STRUCK CAPITAL PI}"),
+-            ("\N{GREEK CAPITAL LETTER SIGMA}",
+-             "\N{GREEK CAPITAL LETTER SIGMA}",
+-             "bf",
+-             "\N{DOUBLE-STRUCK N-ARY SUMMATION}"),
+-            ("\N{GREEK SMALL LETTER GAMMA}",
+-             "\N{GREEK SMALL LETTER GAMMA}",
+-             "bf",
+-             "\N{DOUBLE-STRUCK SMALL GAMMA}"),
+-            ("\N{GREEK SMALL LETTER PI}",
+-             "\N{GREEK SMALL LETTER PI}",
++             "ℾ"),
++            ("Π",
++             "Π",
++             "bf",
++             "ℿ"),
++            ("Σ",
++             "Σ",
++             "bf",
++             "⅀"),
++            ("γ",
++             "γ",
++             "bf",
++             "ℽ"),
++            ("π",
++             "π",
+              "bf",
+-             "\N{DOUBLE-STRUCK SMALL PI}"),
++             "ℼ"),
+         ],
+     },
+     'cal': [
+-        ("\N{LATIN CAPITAL LETTER A}",
+-         "\N{LATIN CAPITAL LETTER Z}",
++        ("A",
++         "Z",
+          "it",
+          0xe22d),
+     ],
+     'frak': {
+         "rm": [
+-            ("\N{LATIN CAPITAL LETTER A}",
+-             "\N{LATIN CAPITAL LETTER B}",
++            ("A",
++             "B",
+              "rm",
+-             "\N{MATHEMATICAL FRAKTUR CAPITAL A}"),
+-            ("\N{LATIN CAPITAL LETTER C}",
+-             "\N{LATIN CAPITAL LETTER C}",
+-             "rm",
+-             "\N{BLACK-LETTER CAPITAL C}"),
+-            ("\N{LATIN CAPITAL LETTER D}",
+-             "\N{LATIN CAPITAL LETTER G}",
+-             "rm",
+-             "\N{MATHEMATICAL FRAKTUR CAPITAL D}"),
+-            ("\N{LATIN CAPITAL LETTER H}",
+-             "\N{LATIN CAPITAL LETTER H}",
+-             "rm",
+-             "\N{BLACK-LETTER CAPITAL H}"),
+-            ("\N{LATIN CAPITAL LETTER I}",
+-             "\N{LATIN CAPITAL LETTER I}",
+-             "rm",
+-             "\N{BLACK-LETTER CAPITAL I}"),
+-            ("\N{LATIN CAPITAL LETTER J}",
+-             "\N{LATIN CAPITAL LETTER Q}",
+-             "rm",
+-             "\N{MATHEMATICAL FRAKTUR CAPITAL J}"),
+-            ("\N{LATIN CAPITAL LETTER R}",
+-             "\N{LATIN CAPITAL LETTER R}",
+-             "rm",
+-             "\N{BLACK-LETTER CAPITAL R}"),
+-            ("\N{LATIN CAPITAL LETTER S}",
+-             "\N{LATIN CAPITAL LETTER Y}",
+-             "rm",
+-             "\N{MATHEMATICAL FRAKTUR CAPITAL S}"),
+-            ("\N{LATIN CAPITAL LETTER Z}",
+-             "\N{LATIN CAPITAL LETTER Z}",
+-             "rm",
+-             "\N{BLACK-LETTER CAPITAL Z}"),
+-            ("\N{LATIN SMALL LETTER A}",
+-             "\N{LATIN SMALL LETTER Z}",
++             "𝔄"),
++            ("C",
++             "C",
++             "rm",
++             "ℭ"),
++            ("D",
++             "G",
++             "rm",
++             "𝔇"),
++            ("H",
++             "H",
++             "rm",
++             "ℌ"),
++            ("I",
++             "I",
++             "rm",
++             "ℑ"),
++            ("J",
++             "Q",
++             "rm",
++             "𝔍"),
++            ("R",
++             "R",
++             "rm",
++             "ℜ"),
++            ("S",
++             "Y",
++             "rm",
++             "𝔖"),
++            ("Z",
++             "Z",
++             "rm",
++             "ℨ"),
++            ("a",
++             "z",
+              "rm",
+-             "\N{MATHEMATICAL FRAKTUR SMALL A}"),
++             "𝔞"),
+             ],
+         "bf": [
+-            ("\N{LATIN CAPITAL LETTER A}",
+-             "\N{LATIN CAPITAL LETTER Z}",
++            ("A",
++             "Z",
+              "bf",
+-             "\N{MATHEMATICAL BOLD FRAKTUR CAPITAL A}"),
+-            ("\N{LATIN SMALL LETTER A}",
+-             "\N{LATIN SMALL LETTER Z}",
++             "𝕬"),
++            ("a",
++             "z",
+              "bf",
+-             "\N{MATHEMATICAL BOLD FRAKTUR SMALL A}"),
++             "𝖆"),
+         ],
+     },
+     'scr': [
+-        ("\N{LATIN CAPITAL LETTER A}",
+-         "\N{LATIN CAPITAL LETTER A}",
++        ("A",
++         "A",
+          "it",
+-         "\N{MATHEMATICAL SCRIPT CAPITAL A}"),
+-        ("\N{LATIN CAPITAL LETTER B}",
+-         "\N{LATIN CAPITAL LETTER B}",
+-         "it",
+-         "\N{SCRIPT CAPITAL B}"),
+-        ("\N{LATIN CAPITAL LETTER C}",
+-         "\N{LATIN CAPITAL LETTER D}",
+-         "it",
+-         "\N{MATHEMATICAL SCRIPT CAPITAL C}"),
+-        ("\N{LATIN CAPITAL LETTER E}",
+-         "\N{LATIN CAPITAL LETTER F}",
+-         "it",
+-         "\N{SCRIPT CAPITAL E}"),
+-        ("\N{LATIN CAPITAL LETTER G}",
+-         "\N{LATIN CAPITAL LETTER G}",
+-         "it",
+-         "\N{MATHEMATICAL SCRIPT CAPITAL G}"),
+-        ("\N{LATIN CAPITAL LETTER H}",
+-         "\N{LATIN CAPITAL LETTER H}",
+-         "it",
+-         "\N{SCRIPT CAPITAL H}"),
+-        ("\N{LATIN CAPITAL LETTER I}",
+-         "\N{LATIN CAPITAL LETTER I}",
+-         "it",
+-         "\N{SCRIPT CAPITAL I}"),
+-        ("\N{LATIN CAPITAL LETTER J}",
+-         "\N{LATIN CAPITAL LETTER K}",
+-         "it",
+-         "\N{MATHEMATICAL SCRIPT CAPITAL J}"),
+-        ("\N{LATIN CAPITAL LETTER L}",
+-         "\N{LATIN CAPITAL LETTER L}",
+-         "it",
+-         "\N{SCRIPT CAPITAL L}"),
+-        ("\N{LATIN CAPITAL LETTER M}",
+-         "\N{LATIN CAPITAL LETTER M}",
+-         "it",
+-         "\N{SCRIPT CAPITAL M}"),
+-        ("\N{LATIN CAPITAL LETTER N}",
+-         "\N{LATIN CAPITAL LETTER Q}",
+-         "it",
+-         "\N{MATHEMATICAL SCRIPT CAPITAL N}"),
+-        ("\N{LATIN CAPITAL LETTER R}",
+-         "\N{LATIN CAPITAL LETTER R}",
+-         "it",
+-         "\N{SCRIPT CAPITAL R}"),
+-        ("\N{LATIN CAPITAL LETTER S}",
+-         "\N{LATIN CAPITAL LETTER Z}",
+-         "it",
+-         "\N{MATHEMATICAL SCRIPT CAPITAL S}"),
+-        ("\N{LATIN SMALL LETTER A}",
+-         "\N{LATIN SMALL LETTER D}",
+-         "it",
+-         "\N{MATHEMATICAL SCRIPT SMALL A}"),
+-        ("\N{LATIN SMALL LETTER E}",
+-         "\N{LATIN SMALL LETTER E}",
+-         "it",
+-         "\N{SCRIPT SMALL E}"),
+-        ("\N{LATIN SMALL LETTER F}",
+-         "\N{LATIN SMALL LETTER F}",
+-         "it",
+-         "\N{MATHEMATICAL SCRIPT SMALL F}"),
+-        ("\N{LATIN SMALL LETTER G}",
+-         "\N{LATIN SMALL LETTER G}",
+-         "it",
+-         "\N{SCRIPT SMALL G}"),
+-        ("\N{LATIN SMALL LETTER H}",
+-         "\N{LATIN SMALL LETTER N}",
+-         "it",
+-         "\N{MATHEMATICAL SCRIPT SMALL H}"),
+-        ("\N{LATIN SMALL LETTER O}",
+-         "\N{LATIN SMALL LETTER O}",
+-         "it",
+-         "\N{SCRIPT SMALL O}"),
+-        ("\N{LATIN SMALL LETTER P}",
+-         "\N{LATIN SMALL LETTER Z}",
++         "𝒜"),
++        ("B",
++         "B",
++         "it",
++         "ℬ"),
++        ("C",
++         "D",
++         "it",
++         "𝒞"),
++        ("E",
++         "F",
++         "it",
++         "ℰ"),
++        ("G",
++         "G",
++         "it",
++         "𝒢"),
++        ("H",
++         "H",
++         "it",
++         "ℋ"),
++        ("I",
++         "I",
++         "it",
++         "ℐ"),
++        ("J",
++         "K",
++         "it",
++         "𝒥"),
++        ("L",
++         "L",
++         "it",
++         "ℒ"),
++        ("M",
++         "M",
++         "it",
++         "ℳ"),
++        ("N",
++         "Q",
++         "it",
++         "𝒩"),
++        ("R",
++         "R",
++         "it",
++         "ℛ"),
++        ("S",
++         "Z",
++         "it",
++         "𝒮"),
++        ("a",
++         "d",
++         "it",
++         "𝒶"),
++        ("e",
++         "e",
++         "it",
++         "ℯ"),
++        ("f",
++         "f",
++         "it",
++         "𝒻"),
++        ("g",
++         "g",
++         "it",
++         "ℊ"),
++        ("h",
++         "n",
++         "it",
++         "𝒽"),
++        ("o",
++         "o",
++         "it",
++         "ℴ"),
++        ("p",
++         "z",
+          "it",
+-         "\N{MATHEMATICAL SCRIPT SMALL P}"),
++         "𝓅"),
+     ],
+     'sf': {
+         "rm": [
+-            ("\N{DIGIT ZERO}",
+-             "\N{DIGIT NINE}",
++            ("0",
++             "9",
+              "rm",
+-             "\N{MATHEMATICAL SANS-SERIF DIGIT ZERO}"),
+-            ("\N{LATIN CAPITAL LETTER A}",
+-             "\N{LATIN CAPITAL LETTER Z}",
+-             "rm",
+-             "\N{MATHEMATICAL SANS-SERIF CAPITAL A}"),
+-            ("\N{LATIN SMALL LETTER A}",
+-             "\N{LATIN SMALL LETTER Z}",
+-             "rm",
+-             "\N{MATHEMATICAL SANS-SERIF SMALL A}"),
+-            ("\N{GREEK CAPITAL LETTER ALPHA}",
+-             "\N{GREEK CAPITAL LETTER OMEGA}",
++             "𝟢"),
++            ("A",
++             "Z",
++             "rm",
++             "𝖠"),
++            ("a",
++             "z",
++             "rm",
++             "𝖺"),
++            ("Α",
++             "Ω",
+              "rm",
+              0xe17d),
+-            ("\N{GREEK SMALL LETTER ALPHA}",
+-             "\N{GREEK SMALL LETTER OMEGA}",
++            ("α",
++             "ω",
+              "rm",
+              0xe196),
+-            ("\N{GREEK THETA SYMBOL}",
+-             "\N{GREEK THETA SYMBOL}",
++            ("ϑ",
++             "ϑ",
+              "rm",
+              0xe1b0),
+-            ("\N{GREEK PHI SYMBOL}",
+-             "\N{GREEK PHI SYMBOL}",
++            ("ϕ",
++             "ϕ",
+              "rm",
+              0xe1b1),
+-            ("\N{GREEK PI SYMBOL}",
+-             "\N{GREEK PI SYMBOL}",
++            ("ϖ",
++             "ϖ",
+              "rm",
+              0xe1b3),
+-            ("\N{GREEK RHO SYMBOL}",
+-             "\N{GREEK RHO SYMBOL}",
++            ("ϱ",
++             "ϱ",
+              "rm",
+              0xe1b2),
+-            ("\N{GREEK LUNATE EPSILON SYMBOL}",
+-             "\N{GREEK LUNATE EPSILON SYMBOL}",
++            ("ϵ",
++             "ϵ",
+              "rm",
+              0xe1af),
+-            ("\N{PARTIAL DIFFERENTIAL}",
+-             "\N{PARTIAL DIFFERENTIAL}",
++            ("∂",
++             "∂",
+              "rm",
+              0xe17c),
+         ],
+         "it": [
+             # These numerals are actually upright.  We don't actually
+             # want italic numerals ever.
+-            ("\N{DIGIT ZERO}",
+-             "\N{DIGIT NINE}",
++            ("0",
++             "9",
+              "rm",
+-             "\N{MATHEMATICAL SANS-SERIF DIGIT ZERO}"),
+-            ("\N{LATIN CAPITAL LETTER A}",
+-             "\N{LATIN CAPITAL LETTER Z}",
+-             "it",
+-             "\N{MATHEMATICAL SANS-SERIF ITALIC CAPITAL A}"),
+-            ("\N{LATIN SMALL LETTER A}",
+-             "\N{LATIN SMALL LETTER Z}",
+-             "it",
+-             "\N{MATHEMATICAL SANS-SERIF ITALIC SMALL A}"),
+-            ("\N{GREEK CAPITAL LETTER ALPHA}",
+-             "\N{GREEK CAPITAL LETTER OMEGA}",
++             "𝟢"),
++            ("A",
++             "Z",
++             "it",
++             "𝘈"),
++            ("a",
++             "z",
++             "it",
++             "𝘢"),
++            ("Α",
++             "Ω",
+              "rm",
+              0xe17d),
+-            ("\N{GREEK SMALL LETTER ALPHA}",
+-             "\N{GREEK SMALL LETTER OMEGA}",
++            ("α",
++             "ω",
+              "it",
+              0xe1d8),
+-            ("\N{GREEK THETA SYMBOL}",
+-             "\N{GREEK THETA SYMBOL}",
++            ("ϑ",
++             "ϑ",
+              "it",
+              0xe1f2),
+-            ("\N{GREEK PHI SYMBOL}",
+-             "\N{GREEK PHI SYMBOL}",
++            ("ϕ",
++             "ϕ",
+              "it",
+              0xe1f3),
+-            ("\N{GREEK PI SYMBOL}",
+-             "\N{GREEK PI SYMBOL}",
++            ("ϖ",
++             "ϖ",
+              "it",
+              0xe1f5),
+-            ("\N{GREEK RHO SYMBOL}",
+-             "\N{GREEK RHO SYMBOL}",
++            ("ϱ",
++             "ϱ",
+              "it",
+              0xe1f4),
+-            ("\N{GREEK LUNATE EPSILON SYMBOL}",
+-             "\N{GREEK LUNATE EPSILON SYMBOL}",
++            ("ϵ",
++             "ϵ",
+              "it",
+              0xe1f1),
+         ],
+         "bf": [
+-            ("\N{DIGIT ZERO}",
+-             "\N{DIGIT NINE}",
++            ("0",
++             "9",
+              "bf",
+-             "\N{MATHEMATICAL SANS-SERIF BOLD DIGIT ZERO}"),
+-            ("\N{LATIN CAPITAL LETTER A}",
+-             "\N{LATIN CAPITAL LETTER Z}",
+-             "bf",
+-             "\N{MATHEMATICAL SANS-SERIF BOLD CAPITAL A}"),
+-            ("\N{LATIN SMALL LETTER A}",
+-             "\N{LATIN SMALL LETTER Z}",
+-             "bf",
+-             "\N{MATHEMATICAL SANS-SERIF BOLD SMALL A}"),
+-            ("\N{GREEK CAPITAL LETTER ALPHA}",
+-             "\N{GREEK CAPITAL LETTER OMEGA}",
+-             "bf",
+-             "\N{MATHEMATICAL SANS-SERIF BOLD CAPITAL ALPHA}"),
+-            ("\N{GREEK SMALL LETTER ALPHA}",
+-             "\N{GREEK SMALL LETTER OMEGA}",
+-             "bf",
+-             "\N{MATHEMATICAL SANS-SERIF BOLD SMALL ALPHA}"),
+-            ("\N{GREEK THETA SYMBOL}",
+-             "\N{GREEK THETA SYMBOL}",
+-             "bf",
+-             "\N{MATHEMATICAL SANS-SERIF BOLD THETA SYMBOL}"),
+-            ("\N{GREEK PHI SYMBOL}",
+-             "\N{GREEK PHI SYMBOL}",
+-             "bf",
+-             "\N{MATHEMATICAL SANS-SERIF BOLD PHI SYMBOL}"),
+-            ("\N{GREEK PI SYMBOL}",
+-             "\N{GREEK PI SYMBOL}",
+-             "bf",
+-             "\N{MATHEMATICAL SANS-SERIF BOLD PI SYMBOL}"),
+-            ("\N{GREEK KAPPA SYMBOL}",
+-             "\N{GREEK KAPPA SYMBOL}",
+-             "bf",
+-             "\N{MATHEMATICAL SANS-SERIF BOLD KAPPA SYMBOL}"),
+-            ("\N{GREEK RHO SYMBOL}",
+-             "\N{GREEK RHO SYMBOL}",
+-             "bf",
+-             "\N{MATHEMATICAL SANS-SERIF BOLD RHO SYMBOL}"),
+-            ("\N{GREEK LUNATE EPSILON SYMBOL}",
+-             "\N{GREEK LUNATE EPSILON SYMBOL}",
+-             "bf",
+-             "\N{MATHEMATICAL SANS-SERIF BOLD EPSILON SYMBOL}"),
+-            ("\N{PARTIAL DIFFERENTIAL}",
+-             "\N{PARTIAL DIFFERENTIAL}",
+-             "bf",
+-             "\N{MATHEMATICAL SANS-SERIF BOLD PARTIAL DIFFERENTIAL}"),
+-            ("\N{NABLA}",
+-             "\N{NABLA}",
++             "𝟬"),
++            ("A",
++             "Z",
++             "bf",
++             "𝗔"),
++            ("a",
++             "z",
++             "bf",
++             "𝗮"),
++            ("Α",
++             "Ω",
++             "bf",
++             "𝝖"),
++            ("α",
++             "ω",
++             "bf",
++             "𝝰"),
++            ("ϑ",
++             "ϑ",
++             "bf",
++             "𝞋"),
++            ("ϕ",
++             "ϕ",
++             "bf",
++             "𝞍"),
++            ("ϖ",
++             "ϖ",
++             "bf",
++             "𝞏"),
++            ("ϰ",
++             "ϰ",
++             "bf",
++             "𝞌"),
++            ("ϱ",
++             "ϱ",
++             "bf",
++             "𝞎"),
++            ("ϵ",
++             "ϵ",
++             "bf",
++             "𝞊"),
++            ("∂",
++             "∂",
++             "bf",
++             "𝞉"),
++            ("∇",
++             "∇",
+              "bf",
+-             "\N{MATHEMATICAL SANS-SERIF BOLD NABLA}"),
++             "𝝯"),
+         ],
+         "bfit": [
+-            ("\N{LATIN CAPITAL LETTER A}",
+-             "\N{LATIN CAPITAL LETTER Z}",
++            ("A",
++             "Z",
+              "bfit",
+-             "\N{MATHEMATICAL BOLD ITALIC CAPITAL A}"),
+-            ("\N{LATIN SMALL LETTER A}",
+-             "\N{LATIN SMALL LETTER Z}",
++             "𝑨"),
++            ("a",
++             "z",
+              "bfit",
+-             "\N{MATHEMATICAL BOLD ITALIC SMALL A}"),
+-            ("\N{GREEK CAPITAL LETTER GAMMA}",
+-             "\N{GREEK CAPITAL LETTER OMEGA}",
++             "𝒂"),
++            ("Γ",
++             "Ω",
+              "bfit",
+-             "\N{MATHEMATICAL BOLD ITALIC CAPITAL GAMMA}"),
+-            ("\N{GREEK SMALL LETTER ALPHA}",
+-             "\N{GREEK SMALL LETTER OMEGA}",
++             "𝜞"),
++            ("α",
++             "ω",
+              "bfit",
+-             "\N{MATHEMATICAL BOLD ITALIC SMALL ALPHA}"),
++             "𝜶"),
+         ],
+     },
+     'tt': [
+-        ("\N{DIGIT ZERO}",
+-         "\N{DIGIT NINE}",
++        ("0",
++         "9",
+          "rm",
+-         "\N{MATHEMATICAL MONOSPACE DIGIT ZERO}"),
+-        ("\N{LATIN CAPITAL LETTER A}",
+-         "\N{LATIN CAPITAL LETTER Z}",
++         "𝟶"),
++        ("A",
++         "Z",
+          "rm",
+-         "\N{MATHEMATICAL MONOSPACE CAPITAL A}"),
+-        ("\N{LATIN SMALL LETTER A}",
+-         "\N{LATIN SMALL LETTER Z}",
++         "𝙰"),
++        ("a",
++         "z",
+          "rm",
+-         "\N{MATHEMATICAL MONOSPACE SMALL A}")
++         "𝚊")
+     ],
+ }
+ 
+diff -ru '--exclude=__pycache__' a/_mathtext.py b/_mathtext.py
+--- a/_mathtext.py	2026-07-12 15:38:51.477567087 +0200
++++ b/_mathtext.py	2026-07-12 15:38:51.526199062 +0200
+@@ -844,8 +844,8 @@
+             sym: str) -> list[tuple[str, str]] | list[tuple[int, str]]:
+         fixes = {
+             '\\{': '{', '\\}': '}', '\\[': '[', '\\]': ']',
+-            '<': '\N{MATHEMATICAL LEFT ANGLE BRACKET}',
+-            '>': '\N{MATHEMATICAL RIGHT ANGLE BRACKET}',
++            '<': '⟨',
++            '>': '⟩',
+         }
+         sym = fixes.get(sym, sym)
+         try:
+@@ -1827,7 +1827,7 @@
+         SCRIPTSCRIPTSTYLE = 3
+ 
+     _binary_operators = set(
+-      '+ * - \N{MINUS SIGN}'
++      '+ * - −'
+       r'''
+       \pm             \sqcap                   \rhd
+       \mp             \sqcup                   \unlhd
+@@ -1966,9 +1966,8 @@
+       """.split())
+     _delims = _left_delims | _right_delims | _ambi_delims
+ 
+-    _small_greek = set([unicodedata.name(chr(i)).split()[-1].lower() for i in
+-                       range(ord('\N{GREEK SMALL LETTER ALPHA}'),
+-                             ord('\N{GREEK SMALL LETTER OMEGA}') + 1)])
++    _small_greek = set(['alpha', 'beta', 'chi', 'delta', 'epsilon', 'eta', 'gamma', 'iota', 'kappa', 'lamda', 'mu', 'nu', 'omega', 'omicron', 'phi', 'pi', 'psi', 'rho', 'sigma', 'tau', 'theta', 'upsilon', 'xi', 'zeta'])  # wasthon: Brython unicodedata lacks names
++
+     _latin_alphabets = set(string.ascii_letters)
+ 
+     def __init__(self) -> None:
+@@ -2269,7 +2268,7 @@
+             # hyphen-minus, because minus sign is unambiguous and because it
+             # is rendered with a more desirable length, usually longer than a
+             # hyphen." (https://www.unicode.org/reports/tr25/)
+-            c = "\N{MINUS SIGN}"
++            c = "−"
+         try:
+             char = Char(c, self.get_state())
+         except ValueError as err:
+diff -ru '--exclude=__pycache__' a/path.py b/path.py
+--- a/path.py	2026-07-12 15:38:51.486362990 +0200
++++ b/path.py	2026-07-12 15:38:51.532305007 +0200
+@@ -282,7 +282,15 @@
+         readonly, even if the source `Path` is.
+         """
+         # Deepcopying arrays (vertices, codes) strips the writeable=False flag.
+-        p = copy.deepcopy(super(), memo)
++        # (py3.14: copyreg.pickle_super breaks the deepcopy(super()) trick,
++        # so reconstruct explicitly; matches upstream's 3.14 fix.)
++        cls = type(self)
++        p = cls.__new__(cls)
++        if memo is None:
++            memo = {}
++        memo[id(self)] = p
++        for k, v in self.__dict__.items():
++            setattr(p, k, copy.deepcopy(v, memo))
+         p._readonly = False
+         return p
+ 
+diff -ru '--exclude=__pycache__' a/projections/geo.py b/projections/geo.py
+--- a/projections/geo.py	2026-07-12 15:38:51.486454072 +0200
++++ b/projections/geo.py	2026-07-12 15:38:51.532389436 +0200
+@@ -25,7 +25,7 @@
+ 
+         def __call__(self, x, pos=None):
+             degrees = round(np.rad2deg(x) / self._round_to) * self._round_to
+-            return f"{degrees:0.0f}\N{DEGREE SIGN}"
++            return f"{degrees:0.0f}°"
+ 
+     RESOLUTION = 75
+ 
+@@ -157,7 +157,7 @@
+         lon, lat = np.rad2deg([lon, lat])
+         ns = 'N' if lat >= 0.0 else 'S'
+         ew = 'E' if lon >= 0.0 else 'W'
+-        return ('%f\N{DEGREE SIGN}%s, %f\N{DEGREE SIGN}%s'
++        return ('%f°%s, %f°%s'
+                 % (abs(lat), ns, abs(lon), ew))
+ 
+     def set_longitude_grid(self, degrees):
+diff -ru '--exclude=__pycache__' a/projections/polar.py b/projections/polar.py
+--- a/projections/polar.py	2026-07-12 15:38:51.486501091 +0200
++++ b/projections/polar.py	2026-07-12 15:38:51.532418430 +0200
+@@ -270,7 +270,7 @@
+         vmin, vmax = self.axis.get_view_interval()
+         d = np.rad2deg(abs(vmax - vmin))
+         digits = max(-int(np.log10(d) - 1.5), 0)
+-        return f"{np.rad2deg(x):0.{digits}f}\N{DEGREE SIGN}"
++        return f"{np.rad2deg(x):0.{digits}f}°"
+ 
+ 
+ class _AxisWrapper:
+@@ -1447,8 +1447,8 @@
+                     cbook._g_sig_digits(value, delta))
+             return f"{value:-{opt}.{prec}{fmt}}"
+ 
+-        return ('\N{GREEK SMALL LETTER THETA}={}\N{GREEK SMALL LETTER PI} '
+-                '({}\N{DEGREE SIGN}), r={}').format(
++        return ('θ={}π '
++                '({}°), r={}').format(
+                     format_sig(theta_halfturns, delta_t_halfturns, "", "f"),
+                     format_sig(theta_degrees, delta_t_degrees, "", "f"),
+                     format_sig(r, delta_r, "#", "g"),
+diff -ru '--exclude=__pycache__' a/pyplot.py b/pyplot.py
+--- a/pyplot.py	2026-07-12 15:38:51.486586792 +0200
++++ b/pyplot.py	2026-07-12 15:38:51.532474095 +0200
+@@ -437,7 +437,12 @@
+     # This is achieved by creating a "class" that inherits from
+     # backend_bases._Backend and whose body is filled with the module globals.
+     class backend_mod(matplotlib.backend_bases._Backend):
+-        locals().update(vars(module))
++        pass
++    for _k, _v in vars(module).items():  # wasthon: class-body locals().update is a no-op in Brython
++        try:
++            setattr(backend_mod, _k, _v)
++        except BaseException:
++            pass
+ 
+     # However, the newer approach for defining new_figure_manager and
+     # show is to derive them from canvas methods.  In that case, also
+diff -ru '--exclude=__pycache__' a/style/core.py b/style/core.py
+--- a/style/core.py	2026-07-12 15:38:51.487089740 +0200
++++ b/style/core.py	2026-07-12 15:38:51.532726060 +0200
+@@ -19,7 +19,13 @@
+ import warnings
+ 
+ if sys.version_info >= (3, 10):
+-    import importlib.resources as importlib_resources
++    try:
++        import importlib.resources as importlib_resources
++    except BaseException:  # wasthon: singledispatch/get_type_hints gap
++        class _NoResources:
++            def files(self, pkg):
++                raise TypeError("importlib.resources unavailable")
++        importlib_resources = _NoResources()
+ else:
+     # Even though Py3.9 has importlib.resources, it doesn't properly handle
+     # modules added in sys.path.
+@@ -196,6 +202,7 @@
+ 
+ 
+ def update_user_library(library):
++    return library  # wasthon: no user stylelib scan in the browser
+     """Update style library with user-defined rc files."""
+     for stylelib_path in map(os.path.expanduser, USER_LIBRARY_PATHS):
+         styles = read_style_directory(stylelib_path)
+@@ -230,7 +237,10 @@
+ 
+ # Load style library
+ # ==================
+-_base_library = read_style_directory(BASE_LIBRARY_PATH)
++try:
++    _base_library = read_style_directory(BASE_LIBRARY_PATH)
++except BaseException:  # wasthon: no directory scan in the browser
++    _base_library = {}
+ library = {}
+ available = []
+ 
+diff -ru '--exclude=__pycache__' a/ticker.py b/ticker.py
+--- a/ticker.py	2026-07-12 15:38:51.524235361 +0200
++++ b/ticker.py	2026-07-12 15:38:51.559158485 +0200
+@@ -251,7 +251,7 @@
+         helper method to perform such a replacement when it is enabled via
+         :rc:`axes.unicode_minus`.
+         """
+-        return (s.replace('-', '\N{MINUS SIGN}')
++        return (s.replace('-', '−')
+                 if mpl.rcParams['axes.unicode_minus']
+                 else s)
+ 
+@@ -1340,7 +1340,7 @@
+         -15: "f",
+         -12: "p",
+          -9: "n",
+-         -6: "\N{MICRO SIGN}",
++         -6: "µ",
+          -3: "m",
+           0: "",
+           3: "k",
+@@ -1379,9 +1379,9 @@
+             other useful options may be:
+ 
+             * ``sep=""`` to append directly the prefix/unit to the value;
+-            * ``sep="\N{THIN SPACE}"`` (``U+2009``);
+-            * ``sep="\N{NARROW NO-BREAK SPACE}"`` (``U+202F``);
+-            * ``sep="\N{NO-BREAK SPACE}"`` (``U+00A0``).
++            * ``sep=" "`` (``U+2009``);
++            * ``sep=" "`` (``U+202F``);
++            * ``sep=" "`` (``U+00A0``).
+ 
+         usetex : bool, default: :rc:`text.usetex`
+             To enable/disable the use of TeX's math mode for rendering the
+@@ -1439,7 +1439,7 @@
+         '1.0 M'
+ 
+         >>> format_eng(-1e-6)  # for self.places = 2
+-        '-1.00 \N{MICRO SIGN}'
++        '-1.00 µ'
+         """
+         sign = 1
+         fmt = "g" if self.places is None else f".{self.places:d}f"
+diff -ru '--exclude=__pycache__' a/transforms.py b/transforms.py
+--- a/transforms.py	2026-07-12 15:38:51.524285746 +0200
++++ b/transforms.py	2026-07-12 15:38:51.559196637 +0200
+@@ -144,7 +144,9 @@
+             for k, v in self._parents.items() if v is not None}
+ 
+     def __copy__(self):
+-        other = copy.copy(super())
++        cls = type(self)
++        other = cls.__new__(cls)
++        other.__dict__.update(self.__dict__)
+         # If `c = a + b; a1 = copy(a)`, then modifications to `a1` do not
+         # propagate back to `c`, i.e. we need to clear the parents of `a1`.
+         other._parents = {}

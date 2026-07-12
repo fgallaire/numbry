@@ -1,0 +1,233 @@
+diff -ru a/actions.py b/actions.py
+--- a/actions.py	2026-07-12 15:38:51.594115974 +0200
++++ b/actions.py	2026-07-12 15:38:51.595034394 +0200
+@@ -256,9 +256,9 @@
+ 
+ # Compatibility synonyms
+ # fmt: off
+-replaceWith = replaced_by_pep8("replaceWith", replace_with)
+-removeQuotes = replaced_by_pep8("removeQuotes", remove_quotes)
+-withAttribute = replaced_by_pep8("withAttribute", with_attribute)
+-withClass = replaced_by_pep8("withClass", with_class)
+-matchOnlyAtCol = replaced_by_pep8("matchOnlyAtCol", match_only_at_col)
++replaceWith = replace_with
++removeQuotes = remove_quotes
++withAttribute = with_attribute
++withClass = with_class
++matchOnlyAtCol = match_only_at_col
+ # fmt: on
+Seulement dans a2/ai: __pycache__
+Seulement dans a2/ai/show_best_practices: __pycache__
+diff -ru a/common.py b/common.py
+--- a/common.py	2026-07-12 15:38:51.594092449 +0200
++++ b/common.py	2026-07-12 15:38:51.595044313 +0200
+@@ -555,13 +555,13 @@
+ 
+     # pre-PEP8 compatibility names
+     # fmt: off
+-    convertToInteger = staticmethod(replaced_by_pep8("convertToInteger", convert_to_integer))
+-    convertToFloat = staticmethod(replaced_by_pep8("convertToFloat", convert_to_float))
+-    convertToDate = staticmethod(replaced_by_pep8("convertToDate", convert_to_date))
+-    convertToDatetime = staticmethod(replaced_by_pep8("convertToDatetime", convert_to_datetime))
+-    stripHTMLTags = staticmethod(replaced_by_pep8("stripHTMLTags", strip_html_tags))
+-    upcaseTokens = staticmethod(replaced_by_pep8("upcaseTokens", upcase_tokens))
+-    downcaseTokens = staticmethod(replaced_by_pep8("downcaseTokens", downcase_tokens))
++    convertToInteger = staticmethod(convert_to_integer)
++    convertToFloat = staticmethod(convert_to_float)
++    convertToDate = staticmethod(convert_to_date)
++    convertToDatetime = staticmethod(convert_to_datetime)
++    stripHTMLTags = staticmethod(strip_html_tags)
++    upcaseTokens = staticmethod(upcase_tokens)
++    downcaseTokens = staticmethod(downcase_tokens)
+     # fmt: on
+ 
+ 
+diff -ru a/core.py b/core.py
+--- a/core.py	2026-07-12 15:38:51.594019021 +0200
++++ b/core.py	2026-07-12 15:38:51.595056556 +0200
+@@ -2590,36 +2590,36 @@
+ 
+     # Compatibility synonyms
+     # fmt: off
+-    inlineLiteralsUsing = staticmethod(replaced_by_pep8("inlineLiteralsUsing", inline_literals_using))
++    inlineLiteralsUsing = staticmethod(inline_literals_using)
+     setDefaultWhitespaceChars = staticmethod(replaced_by_pep8(
+         "setDefaultWhitespaceChars", set_default_whitespace_chars
+     ))
+-    disableMemoization = staticmethod(replaced_by_pep8("disableMemoization", disable_memoization))
+-    enableLeftRecursion = staticmethod(replaced_by_pep8("enableLeftRecursion", enable_left_recursion))
+-    enablePackrat = staticmethod(replaced_by_pep8("enablePackrat", enable_packrat))
+-    resetCache = staticmethod(replaced_by_pep8("resetCache", reset_cache))
+-
+-    setResultsName = replaced_by_pep8("setResultsName", set_results_name)
+-    setBreak = replaced_by_pep8("setBreak", set_break)
+-    setParseAction = replaced_by_pep8("setParseAction", set_parse_action)
+-    addParseAction = replaced_by_pep8("addParseAction", add_parse_action)
+-    addCondition = replaced_by_pep8("addCondition", add_condition)
+-    setFailAction = replaced_by_pep8("setFailAction", set_fail_action)
+-    tryParse = replaced_by_pep8("tryParse", try_parse)
+-    parseString = replaced_by_pep8("parseString", parse_string)
+-    scanString = replaced_by_pep8("scanString", scan_string)
+-    transformString = replaced_by_pep8("transformString", transform_string)
+-    searchString = replaced_by_pep8("searchString", search_string)
+-    ignoreWhitespace = replaced_by_pep8("ignoreWhitespace", ignore_whitespace)
+-    leaveWhitespace = replaced_by_pep8("leaveWhitespace", leave_whitespace)
+-    setWhitespaceChars = replaced_by_pep8("setWhitespaceChars", set_whitespace_chars)
+-    parseWithTabs = replaced_by_pep8("parseWithTabs", parse_with_tabs)
+-    setDebugActions = replaced_by_pep8("setDebugActions", set_debug_actions)
+-    setDebug = replaced_by_pep8("setDebug", set_debug)
+-    setName = replaced_by_pep8("setName", set_name)
+-    parseFile = replaced_by_pep8("parseFile", parse_file)
+-    runTests = replaced_by_pep8("runTests", run_tests)
+-    canParseNext = replaced_by_pep8("canParseNext", can_parse_next)
++    disableMemoization = staticmethod(disable_memoization)
++    enableLeftRecursion = staticmethod(enable_left_recursion)
++    enablePackrat = staticmethod(enable_packrat)
++    resetCache = staticmethod(reset_cache)
++
++    setResultsName = set_results_name
++    setBreak = set_break
++    setParseAction = set_parse_action
++    addParseAction = add_parse_action
++    addCondition = add_condition
++    setFailAction = set_fail_action
++    tryParse = try_parse
++    parseString = parse_string
++    scanString = scan_string
++    transformString = transform_string
++    searchString = search_string
++    ignoreWhitespace = ignore_whitespace
++    leaveWhitespace = leave_whitespace
++    setWhitespaceChars = set_whitespace_chars
++    parseWithTabs = parse_with_tabs
++    setDebugActions = set_debug_actions
++    setDebug = set_debug
++    setName = set_name
++    parseFile = parse_file
++    runTests = run_tests
++    canParseNext = can_parse_next
+     defaultName = default_name
+     # fmt: on
+ 
+@@ -2921,7 +2921,7 @@
+ 
+     # Compatibility synonyms
+     setDefaultKeywordChars = staticmethod(
+-        replaced_by_pep8("setDefaultKeywordChars", set_default_keyword_chars)
++        set_default_keyword_chars
+     )
+ 
+ 
+@@ -4459,8 +4459,8 @@
+ 
+     # Compatibility synonyms
+     # fmt: off
+-    leaveWhitespace = replaced_by_pep8("leaveWhitespace", leave_whitespace)
+-    ignoreWhitespace = replaced_by_pep8("ignoreWhitespace", ignore_whitespace)
++    leaveWhitespace = leave_whitespace
++    ignoreWhitespace = ignore_whitespace
+     # fmt: on
+ 
+ 
+@@ -5230,8 +5230,8 @@
+ 
+     # Compatibility synonyms
+     # fmt: off
+-    leaveWhitespace = replaced_by_pep8("leaveWhitespace", leave_whitespace)
+-    ignoreWhitespace = replaced_by_pep8("ignoreWhitespace", ignore_whitespace)
++    leaveWhitespace = leave_whitespace
++    ignoreWhitespace = ignore_whitespace
+     # fmt: on
+ 
+ 
+@@ -6408,8 +6408,8 @@
+ 
+     # Compatibility synonyms
+     # fmt: off
+-    leaveWhitespace = replaced_by_pep8("leaveWhitespace", leave_whitespace)
+-    ignoreWhitespace = replaced_by_pep8("ignoreWhitespace", ignore_whitespace)
++    leaveWhitespace = leave_whitespace
++    ignoreWhitespace = ignore_whitespace
+     # fmt: on
+ 
+ 
+@@ -6944,8 +6944,8 @@
+ lineEnd = line_end
+ stringStart = string_start
+ stringEnd = string_end
+-nullDebugAction = replaced_by_pep8("nullDebugAction", null_debug_action)
+-traceParseAction = replaced_by_pep8("traceParseAction", trace_parse_action)
+-conditionAsParseAction = replaced_by_pep8("conditionAsParseAction", condition_as_parse_action)
+-tokenMap = replaced_by_pep8("tokenMap", token_map)
++nullDebugAction = null_debug_action
++traceParseAction = trace_parse_action
++conditionAsParseAction = condition_as_parse_action
++tokenMap = token_map
+ # fmt: on
+Seulement dans a2/diagram: __pycache__
+diff -ru a/exceptions.py b/exceptions.py
+--- a/exceptions.py	2026-07-12 15:38:51.593952756 +0200
++++ b/exceptions.py	2026-07-12 15:38:51.595124644 +0200
+@@ -293,7 +293,7 @@
+ 
+     # Compatibility synonyms
+     # fmt: off
+-    markInputline = replaced_by_pep8("markInputline", mark_input_line)
++    markInputline = mark_input_line
+     # fmt: on
+ 
+ 
+diff -ru a/helpers.py b/helpers.py
+--- a/helpers.py	2026-07-12 15:38:51.593933580 +0200
++++ b/helpers.py	2026-07-12 15:38:51.595136166 +0200
+@@ -1204,17 +1204,17 @@
+ cppStyleComment = cpp_style_comment
+ javaStyleComment = java_style_comment
+ pythonStyleComment = python_style_comment
+-delimitedList = replaced_by_pep8("delimitedList", DelimitedList)
+-delimited_list = replaced_by_pep8("delimited_list", DelimitedList)
+-countedArray = replaced_by_pep8("countedArray", counted_array)
+-matchPreviousLiteral = replaced_by_pep8("matchPreviousLiteral", match_previous_literal)
+-matchPreviousExpr = replaced_by_pep8("matchPreviousExpr", match_previous_expr)
+-oneOf = replaced_by_pep8("oneOf", one_of)
+-dictOf = replaced_by_pep8("dictOf", dict_of)
+-originalTextFor = replaced_by_pep8("originalTextFor", original_text_for)
+-nestedExpr = replaced_by_pep8("nestedExpr", nested_expr)
+-makeHTMLTags = replaced_by_pep8("makeHTMLTags", make_html_tags)
+-makeXMLTags = replaced_by_pep8("makeXMLTags", make_xml_tags)
+-replaceHTMLEntity = replaced_by_pep8("replaceHTMLEntity", replace_html_entity)
+-infixNotation = replaced_by_pep8("infixNotation", infix_notation)
++delimitedList = DelimitedList
++delimited_list = DelimitedList
++countedArray = counted_array
++matchPreviousLiteral = match_previous_literal
++matchPreviousExpr = match_previous_expr
++oneOf = one_of
++dictOf = dict_of
++originalTextFor = original_text_for
++nestedExpr = nested_expr
++makeHTMLTags = make_html_tags
++makeXMLTags = make_xml_tags
++replaceHTMLEntity = replace_html_entity
++infixNotation = infix_notation
+ # fmt: on
+diff -ru a/__init__.py b/__init__.py
+--- a/__init__.py	2026-07-12 15:38:51.594135671 +0200
++++ b/__init__.py	2026-07-12 15:38:51.595154290 +0200
+@@ -158,7 +158,6 @@
+     pyparsing_common as common,
+     _builtin_exprs as common_builtin_exprs,
+ )
+-from importlib import resources
+ import sys
+ 
+ # Compatibility synonyms
+@@ -222,6 +221,7 @@
+         python -m pyparsing.ai.show_best_practices
+     """
+     try:
++        from importlib import resources
+         path = resources.files(__package__).joinpath("ai/best_practices.md")
+         with path.open("r", encoding="utf-8") as f:
+             content = f.read()
+Seulement dans a2/tools: __pycache__
