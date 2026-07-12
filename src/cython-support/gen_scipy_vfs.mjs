@@ -106,11 +106,20 @@ add('scipy._lib.array_api_compat',
 
 // scipy.special: ndimage._interpolation imports it at module level but only
 // uses cosdg/sindg (degree-argument cos/sin) inside rotate(). The full module
-// (cephes/xsf) isn't built for this smoke — stub those two.
+// (cephes/xsf) isn't built for this smoke — stub those two. Like cephes, the
+// stubs are EXACT at multiples of 90 (reduce in degrees first): a plain
+// sin(deg2rad(180)) = 1.22e-16 made rotate(180)'s matrix inexact, smearing
+// one boundary element (test_rotate_exact_180).
 add('scipy.special',
   'import numpy as _np\n' +
-  'def cosdg(x):\n    return _np.cos(_np.deg2rad(x))\n' +
-  'def sindg(x):\n    return _np.sin(_np.deg2rad(x))\n', true);
+  'def sindg(x):\n' +
+  '    r = _np.remainder(x, 360.0)\n' +
+  '    if r == 0.0:\n        return 0.0\n' +
+  '    if r == 90.0:\n        return 1.0\n' +
+  '    if r == 180.0:\n        return 0.0\n' +
+  '    if r == 270.0:\n        return -1.0\n' +
+  '    return _np.sin(_np.deg2rad(x))\n' +
+  'def cosdg(x):\n    return sindg(x + 90.0)\n', true);
 
 // scipy bootstrap: real __init__ / _distributor_init, stubbed generated files.
 add('scipy', fs.readFileSync(path.join(SC, 'scipy', '__init__.py'), 'utf8'), true);
