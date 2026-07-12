@@ -1,5 +1,37 @@
 # matplotlib — feasibility recon (2026-07-07)
 
+**Status: PORTED and deployed (2026-07-12).** `loader/test-matplotlib.html`
+renders a real figure (Agg + FreeType text, 480×320) and blits
+`buffer_rgba()` onto a canvas, on the deployed site. The build chain is
+`mplbuild.sh` (24 objects → `npmpl.mjs`, wired in `build.sh`) +
+`gen_mpl_vfs.mjs` (215-module VFS + `window.MPL_DATA` fonts/matplotlibrc) +
+`mpl-vfs.patch`/`pyparsing-vfs.patch` (browser fixes to the Python layer).
+What the recon below predicted as "the pybind11 wall" fell in three rungs,
+all of the same nature — pybind11 casts bridge handles to CPython structs
+and reads fields by offset, so the bridge makes those objects *real*:
+
+1. **`PyType_Type.tp_alloc`** hands out raw `PyHeapTypeObject` memory that
+   `PyType_Ready` consumes (pybind11's `get_internals()` builds 3 internal
+   types by the manual heap-type protocol).
+2. **`PyCFunction_NewEx`** returns an actual 24-byte `PyCFunctionObject`
+   whose address is the handle (`m_ml`/`m_self` readable by offset), with
+   the Brython trampoline bound on top.
+3. The `draw_path` table-OOB was **not** pybind11 at all:
+   `-DPY_ARRAY_UNIQUE_SYMBOL` was missing, so `NO_IMPORT_ARRAY` translation
+   units linked `PyArray_API` with one indirection too many. One shared
+   symbol per wasm module fixes it.
+
+Other outcomes vs the recon: **FreeType = emscripten port**
+(`-sUSE_FREETYPE=1`), zero vendoring — the assumed-hard piece was trivial;
+kiwisolver built with the same pybind11 layer; contourpy/`_tri`/`_qhull`
+skipped (optional); Pillow is a stub (import-level only). Pin
+**pybind11 == 2.13.6 exactly** — the header seds are calibrated on it.
+Bridge-side fixes are logged in wasthon's `CHANGELOG.md` (buffer protocol
+for static types, `Py_BuildValue s#/y#`, borrowed exporter views). The
+recon below is kept as the original analysis.
+
+---
+
 **Verdict: the most REACHABLE of the high-appeal "hard" libraries. NO Cython, NO
 Fortran, NO scipy. Array access goes through the standard numpy C-API the bridge
 ALREADY IMPLEMENTS (the `_core` port). The only genuinely new wall = a "pybind11 support
