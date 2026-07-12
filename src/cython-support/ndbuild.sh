@@ -61,10 +61,15 @@ build_pyx "scipy.ndimage._ni_label" "$NDSRC/_ni_label.pyx" || FAILED="$FAILED _n
 # _ccallback_c: required at `import scipy` (scipy._lib._ccallback imports it
 # unconditionally). Self-contained Cython (cdef extern from ccallback.h).
 build_pyx "scipy._lib._ccallback_c" "$ND/scipy/_lib/_ccallback_c.pyx" || FAILED="$FAILED _ccallback_c"
+# _cytest: LowLevelCallable test-support module (test_c_api imports it)
+build_pyx "scipy.ndimage._cytest" "$NDSRC/_cytest.pyx" || FAILED="$FAILED _cytest"
 
 # ---- _nd_image: 8 plain-C files. nd_image.c owns the array API import
 # (nd_image.h defines PY_ARRAY_UNIQUE_SYMBOL _scipy_ndimage_ARRAY_API); the
 # other 7 reference it -> compile them with NO_IMPORT_ARRAY.
+# _ctest: plain-C LowLevelCallable test-support module (no numpy)
+emcc $CFLAGS "$NDSRC/_ctest.c" -o "$OUT/_ctest.o" 2>"$OUT/_ctest_cc.txt" || FAILED="$FAILED _ctest"
+N=$(grep -c 'error:' "$OUT/_ctest_cc.txt" || true); [ "$N" != 0 ] && { echo "_ctest: errors=$N"; grep -m3 'error:' "$OUT/_ctest_cc.txt"; FAILED="$FAILED _ctest"; }
 emcc $CFLAGS "$NDSRC/nd_image.c" -o "$OUT/nd_image.o" 2>"$OUT/nd_image_cc.txt" || FAILED="$FAILED nd_image"
 N=$(grep -c 'error:' "$OUT/nd_image_cc.txt" || true); [ "$N" != 0 ] && { echo "nd_image: errors=$N"; grep -m3 'error:' "$OUT/nd_image_cc.txt"; }
 for F in ni_filters ni_fourier ni_interpolation ni_measure ni_morphology ni_splines ni_support; do
@@ -78,7 +83,7 @@ if [ -n "$FAILED" ]; then echo "compile failures — not linking"; exit 1; fi
 
 # ---- link: numpy core + numpy.random + ndimage + wasthon -> build/npnd.{mjs,wasm}
 NR="$ROOT/build/nprnd-obj"
-EXP='"_PyInit__multiarray_umath","_wasthon_init","_wasthon_module_create","_malloc","_free","_PyInit__common","_PyInit_bit_generator","_PyInit__mt19937","_PyInit__philox","_PyInit__pcg64","_PyInit__sfc64","_PyInit__bounded_integers","_PyInit__generator","_PyInit_mtrand","_PyInit__nd_image","_PyInit__ni_label","_PyInit__ccallback_c"'
+EXP='"_PyInit__multiarray_umath","_wasthon_init","_wasthon_module_create","_malloc","_free","_PyInit__common","_PyInit_bit_generator","_PyInit__mt19937","_PyInit__philox","_PyInit__pcg64","_PyInit__sfc64","_PyInit__bounded_integers","_PyInit__generator","_PyInit_mtrand","_PyInit__nd_image","_PyInit__ni_label","_PyInit__ccallback_c","_PyInit__ctest","_PyInit__cytest"'
 CY="$NR/_common.o $NR/bit_generator.o $NR/_mt19937.o $NR/_philox.o $NR/_pcg64.o $NR/_sfc64.o $NR/_bounded_integers.o $NR/_generator.o $NR/mtrand.o"
 ALGO="$NR/mt19937.o $NR/mt19937-jump.o $NR/philox.o $NR/pcg64.o $NR/sfc64.o $NR/legacy-distributions.o"
 emcc -O1 "$ROOT"/numpy-probe/obj/*.o "$ROOT/build/wasthon.o" "$NR/tanh_stub.o" $CY $ALGO "$NR"/npyrandom/*.o "$OUT"/*.o \
