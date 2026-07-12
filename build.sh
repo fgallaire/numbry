@@ -17,6 +17,7 @@ NUMPY_TAG="v2.5.1"
 PANDAS_TAG="v2.2.3"
 SCIPY_TAG="v1.14.1"
 MPL_TAG="v3.9.2"
+SEABORN_TAG="v0.13.2"
 KIWI_TAG="1.4.7"        # nucleic/kiwi (kiwisolver's home repo)
 PYBIND11_PIN="2.13.6"   # EXACTLY: mplbuild.sh's header seds are calibrated on it
 CYTHON_COMMIT="1fcb9f4c0cb0a67148f5bb4551cf10571cb7b569"   # fgallaire/cython fix-argsslice-fastcall (3.3 master + ArgsSlice fix) — scipy
@@ -53,6 +54,7 @@ git -C "$NP" submodule update --init --depth 1 \
 PD="$W/pandas-src"; pin https://github.com/pandas-dev/pandas "$PD" "$PANDAS_TAG"
 SC="$W/scipy-src";  pin https://github.com/scipy/scipy.git   "$SC" "$SCIPY_TAG"
 MPL="$W/matplotlib-src"; pin https://github.com/matplotlib/matplotlib.git "$MPL" "$MPL_TAG"
+SB="$W/seaborn-src"; pin https://github.com/mwaskom/seaborn.git "$SB" "$SEABORN_TAG"
 KIWI="$W/kiwisolver-src"; pin https://github.com/nucleic/kiwi.git "$KIWI" "$KIWI_TAG"
 CY="$W/cython-src";   pin https://github.com/fgallaire/cython.git "$CY" "$CYTHON_COMMIT"
 CY30="$W/cython30-src"; pin https://github.com/cython/cython.git "$CY30" "$CYTHON30_TAG"
@@ -118,6 +120,10 @@ PYBIND11_INC="$PYTOOLS/pybind11/include" CPPY_INC="$PYTOOLS/cppy/include" \
   bash "$W/cython-support/mplbuild.sh" "$MPL" "$NP" "$KIWI"
 node "$W/cython-support/gen_mpl_vfs.mjs" "$MPL/lib" "$KIWI/py" "$MPLDEPS" "$DEPS"
 
+echo "=== seaborn (pure Python): combined numpy+pandas+mpl link -> build/npsb.mjs ==="
+bash "$W/cython-support/sblink.sh"
+node "$W/cython-support/gen_sb_vfs.mjs" "$SB/seaborn"
+
 echo "=== VFS blobs (numpy / pandas+tests / scipy+tests) ==="
 # a git-tag tree lacks the two meson-generated modules the numpy boot imports
 ( cd "$NP" && python3 numpy/_build_utils/gitversion.py --write numpy/version.py )
@@ -128,11 +134,11 @@ node "$W/cython-support/gen_scipy_vfs.mjs" "$SC"
 
 echo "=== collect artifacts ==="
 mkdir -p "$HERE/build"
-for f in numpy_multiarray_umath nprnd npnd nppd npmpl; do
+for f in numpy_multiarray_umath nprnd npnd nppd npmpl npsb; do
   cp "$W/build/$f.mjs" "$W/build/$f.wasm" "$HERE/build/"
 done
 cp "$W"/build/numpy_vfs.js "$W"/build/pandas_vfs.js "$W"/build/scipy_ndimage_vfs.js \
-   "$W"/build/dateutil_zoneinfo_data.js "$W"/build/mpl_vfs.js "$HERE/build/"
+   "$W"/build/dateutil_zoneinfo_data.js "$W"/build/mpl_vfs.js "$W"/build/sb_vfs.js "$HERE/build/"
 rm -rf "$HERE/loader/brython"
 cp -r "$W/loader/brython" "$HERE/loader/brython"
 # numpy.random's data-driven tests (test_direct) XHR ./data/*.csv relative to
