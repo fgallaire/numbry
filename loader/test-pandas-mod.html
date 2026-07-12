@@ -331,16 +331,7 @@ try {
 # dateutil reads its embedded zoneinfo tarball through pkgutil.get_data
 # (pandas' timezones C module calls gettz("UTC") at init); serve the
 # base64 payload from the page. Must run before any dateutil import.
-import base64
-import pkgutil
-from browser import window
-_zdata = base64.b64decode(window.DATEUTIL_ZONEINFO_B64)
-_orig_get_data = pkgutil.get_data
-def _get_data(package, resource):
-    if package == "dateutil.zoneinfo" and resource.endswith(".tar.gz"):
-        return _zdata
-    return _orig_get_data(package, resource)
-pkgutil.get_data = _get_data
+# dateutil zoneinfo: pre-extracted (window.DATEUTIL_ZONEINFO), lazy VFS override
 
 try:
     _mod = __import__(${JSON.stringify(TEST)}, fromlist=["_"])

@@ -15,7 +15,7 @@
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 const require = createRequire(import.meta.url);
-const fs = require('fs'), path = require('path');
+const fs = require('fs'), path = require('path'), zlib = require('zlib');
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
 const PD = process.argv[2], DEPS = process.argv[3];
@@ -56,6 +56,9 @@ for (const m of ['mmap', 'ctypes']) {
 // fallback shells out to git -> posix.pipe, unavailable in the browser)
 scripts['pandas._version_meson'] = ['.py', fs.readFileSync(path.join(HERE, 'pandas-stubs', '_version_meson.py'), 'utf8'), [], false];
 n++;
+// dateutil.zoneinfo override: lazy zones from the build-extracted JS dict
+// instead of the 2-minute pure-Python tarfile walk (see untar below)
+scripts['dateutil.zoneinfo'] = ['.py', fs.readFileSync(path.join(HERE, 'pandas-stubs', 'dateutil_zoneinfo_init.py'), 'utf8'), [], true];
 // hypothesis stub (package + the two extra.* submodules
 // pandas._testing._hypothesis imports): @given tests -> skips.
 scripts['hypothesis'] = ['.py', fs.readFileSync(path.join(HERE, 'pandas-stubs', 'hypothesis.py'), 'utf8'), [], true];
@@ -69,8 +72,29 @@ const blob = ';(function(){\nif(typeof __BRYTHON__==="undefined"){throw new Erro
 fs.writeFileSync(OUT, blob);
 console.log('pandas VFS: ' + n + ' modules, ' + (bytes / 1048576).toFixed(1) + ' MB src, blob ' + (blob.length / 1048576).toFixed(1) + ' MB -> ' + OUT);
 
+// dateutil's zoneinfo, EXTRACTED at build time: at runtime, upstream
+// ZoneInfoFile tarfile-walks the 619-member tarball and parses every tzfile
+// under pure-Python tarfile — 2 minutes of Brython at `import pandas`. Ship
+// {zone: base64(tzif)} instead; the dateutil.zoneinfo override in the VFS
+// (pandas-stubs/dateutil_zoneinfo_init.py) reads it and parses zones lazily.
+function untar(buf) {
+  const out = {}, links = {};
+  let off = 0;
+  while (off + 512 <= buf.length) {
+    const name = buf.toString('utf8', off, off + 100).replace(/\0.*$/s, '');
+    if (!name) break;
+    const size = parseInt(buf.toString('utf8', off + 124, off + 136).trim() || '0', 8);
+    const type = String.fromCharCode(buf[off + 156]);
+    const linkname = buf.toString('utf8', off + 157, off + 257).replace(/\0.*$/s, '');
+    if (type === '0' || type === '\0') out[name] = buf.subarray(off + 512, off + 512 + size).toString('base64');
+    else if (type === '1' || type === '2') links[name] = linkname;
+    off += 512 + Math.ceil(size / 512) * 512;
+  }
+  for (const [n, t] of Object.entries(links)) if (out[t] !== undefined) out[n] = out[t];
+  return out;
+}
 const tarball = path.join(DEPS, 'dateutil', 'zoneinfo', 'dateutil-zoneinfo.tar.gz');
 const ZOUT = path.join(ROOT, 'build', 'dateutil_zoneinfo_data.js');
-const b64 = fs.readFileSync(tarball).toString('base64');
-fs.writeFileSync(ZOUT, 'window.DATEUTIL_ZONEINFO_B64="' + b64 + '"\n');
-console.log('zoneinfo data: ' + (b64.length / 1024).toFixed(0) + ' KB b64 -> ' + ZOUT);
+const zones = untar(zlib.gunzipSync(fs.readFileSync(tarball)));
+fs.writeFileSync(ZOUT, 'window.DATEUTIL_ZONEINFO=' + JSON.stringify(zones) + '\n');
+console.log('zoneinfo data: ' + Object.keys(zones).length + ' zones extracted -> ' + ZOUT);
