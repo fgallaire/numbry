@@ -15,6 +15,7 @@
   tr.somefail { background: #fde8e8; }
   tr.importfail { background: #fff4e0; }
   tr.timeout  { background: #fff4e0; }
+  tr.group td { background:#eef; font-weight:600; text-align:left; color:#334; }
   td.num { font-variant-numeric: tabular-nums; }
   .bar { display:inline-block; height:10px; background:#0a0; border-radius:2px; vertical-align:middle; }
   .barbg { display:inline-block; height:10px; width:80px; background:#eee; border-radius:2px; vertical-align:middle; text-align:left; }
@@ -26,16 +27,16 @@
 <p style="font-size:0.85em;margin:0 0 1em 0;"><a href="index.html">← back to index</a></p>
 <h1>wasthon — scipy suite dashboard</h1>
 <p style="color:#666;font-size:0.9em;max-width:74ch;">
-  Runs modules from <b>SciPy 1.14.1</b>'s own <code>scipy.ndimage</code> test suite
-  (<code>scipy/ndimage/tests/test_*.py</code>) against wasthon — the compiled
-  <code>_nd_image</code>/<code>_ni_label</code> wasm — each in a fresh page
-  (<code>test-scipy.html?test=…</code>) so no module contaminates another. A minimal
-  <code>pytest</code> shim supplies <code>raises</code>/<code>mark.parametrize</code>/
-  <code>fixture</code>/… Scores are numpy's own assertions. Only the pytest-portable
-  subset is listed — modules needing <code>numpy.random</code>, C test-extensions,
-  <code>ctypes</code>/<code>mmap</code>/<code>zoneinfo</code>, or <code>hypothesis</code>
-  are out of scope. Failures are real bridge/behaviour gaps (the backlog to fix);
-  a few come from the shim's fixture limits.
+  <b>SciPy 1.14.1</b>'s own test suites for the three Fortran-free subpackages
+  ported to wasthon — <code>scipy.ndimage</code> (compiled <code>_nd_image</code>/
+  <code>_ni_label</code>), <code>scipy.special</code> (cephes/xsf/Boost.Math, nine
+  extensions, <code>dstevr</code> on <code>lapack_lite</code>), and
+  <code>scipy.fft</code> (<code>pypocketfft</code> over pybind11). Each module runs
+  in a fresh page against its own wasm bundle (npnd / npsp / npfft) so nothing
+  contaminates anything else. Scores are scipy's own assertions. Only the
+  pytest-portable subset is listed — modules needing <code>scipy.integrate</code>
+  (Fortran), <code>mpmath</code>/<code>hypothesis</code>, threading, the uarray
+  backend registry, or <code>numpy.random</code> are out of scope.
 </p>
 
 <table id="results">
@@ -48,38 +49,53 @@
 <div id="summary">⏳ Running…</div>
 
 <script>
-// scipy.ndimage's own test modules, smallest first. Each runs in its own
-// iframe (fresh wasm) — no cross-module contamination.
-const MODULES = [
-  'scipy.ndimage.tests.test_ni_support',
-  'scipy.ndimage.tests.test_datatypes',
-  'scipy.ndimage.tests.test_splines',
-  'scipy.ndimage.tests.test_fourier',
-  'scipy.ndimage.tests.test_c_api',
-  'scipy.ndimage.tests.test_filters',
-  'scipy.ndimage.tests.test_interpolation',
-  'scipy.ndimage.tests.test_measurements',
-  'scipy.ndimage.tests.test_morphology',
+// Each subpackage loads a different wasm through a different runner page.
+const GROUPS = [
+  { name: 'scipy.ndimage', page: 'test-scipy.html', mods: [
+    'test_ni_support', 'test_datatypes', 'test_splines', 'test_fourier',
+    'test_c_api', 'test_filters', 'test_interpolation', 'test_measurements',
+    'test_morphology',
+  ].map(m => 'scipy.ndimage.tests.' + m) },
+  { name: 'scipy.special', page: 'test-scipy-special.html', mods: [
+    'test_ufunc_signatures', 'test_gamma', 'test_digamma', 'test_loggamma',
+    'test_trig', 'test_sici', 'test_spence', 'test_zeta', 'test_ndtr',
+    'test_ndtri_exp', 'test_round', 'test_nan_inputs', 'test_kolmogorov',
+    'test_iv_ratio', 'test_log_softmax', 'test_logsumexp', 'test_sf_error',
+    'test_exponential_integrals', 'test_orthogonal_eval', 'test_pcf',
+    'test_owens_t', 'test_wrightomega', 'test_cython_special', 'test_specfun',
+  ].map(m => 'scipy.special.tests.' + m) },
+  // scipy.fft: only test_helper is in scope — the rest test threading,
+  // the uarray backend registry, or pull scipy.fftpack (not ported).
+  { name: 'scipy.fft', page: 'test-scipy-fft.html', mods: [
+    'scipy.fft.tests.test_helper',
+  ] },
 ];
 
-// every module runs against the combined numpy + numpy.random + ndimage wasm.
-function runnerFor(mod) {
-  return 'test-scipy.html';
+// Flat list of {mod, page, group?} rows (group rows are section headers).
+const ROWS = [];
+for (const g of GROUPS) {
+  ROWS.push({ group: g.name });
+  for (const m of g.mods) ROWS.push({ mod: m, page: g.page });
 }
 
 const TIMEOUT_MS = 420_000;
 const POLL_MS = 300;
 
-function shortName(m) { return m.split('.').slice(-1)[0] + ' · ' + m.split('.').slice(0, -1).slice(-2).join('.'); }
+function shortName(m) { return m.split('.').slice(-1)[0]; }
 
 function init() {
   const tbody = document.querySelector('#results tbody');
-  for (const m of MODULES) {
+  for (const r of ROWS) {
     const tr = document.createElement('tr');
-    tr.className = 'pending';
-    tr.innerHTML = `<td><a href="${runnerFor(m)}?test=${m}" target="_blank">${shortName(m)}</a></td>
-      <td class="num">—</td><td class="num">—</td><td class="num">—</td>
-      <td class="num">—</td><td>—</td><td>⏳</td>`;
+    if (r.group) {
+      tr.className = 'group';
+      tr.innerHTML = `<td colspan="7">${r.group}</td>`;
+    } else {
+      tr.className = 'pending';
+      tr.innerHTML = `<td><a href="${r.page}?test=${r.mod}" target="_blank">${shortName(r.mod)}</a></td>
+        <td class="num">—</td><td class="num">—</td><td class="num">—</td>
+        <td class="num">—</td><td>—</td><td>⏳</td>`;
+    }
     tbody.appendChild(tr);
   }
 }
@@ -101,12 +117,12 @@ function parseCounts(log) {
   };
 }
 
-function runOne(mod, idx) {
+function runOne(row, idx) {
   setRow(idx, 'running', ['…', '…', '…', '…', '…', '🔄']);
   return new Promise(resolve => {
     const iframe = document.createElement('iframe');
     iframe.style.display = 'none';
-    iframe.src = `${runnerFor(mod)}?test=${mod}`;
+    iframe.src = `${row.page}?test=${row.mod}`;
     document.body.appendChild(iframe);
     const finish = (result) => {
       clearInterval(poller); clearTimeout(timer);
@@ -128,8 +144,6 @@ function runOne(mod, idx) {
       }
       const fail = c.fail || 0, ran = c.ran || 0, passed = c.passed || 0, skipped = c.skipped || 0;
       const runnable = passed + fail;
-      // 0 runnable (everything skipped): nothing failed — that's 100%,
-      // not 0% (the 1.0 gate is pass/(pass+fail), skips excluded).
       const rate = runnable ? Math.round(100 * passed / runnable) : 100;
       const bar = `<span class="barbg"><span class="bar" style="width:${Math.round(0.8 * rate)}px"></span></span> ${rate}%`;
       const allpass = fail === 0 && ran > 0;
@@ -145,8 +159,9 @@ function runOne(mod, idx) {
 
 async function runAll() {
   let totRan = 0, totPass = 0, totFail = 0, totSkip = 0, modsOK = 0, modsRun = 0, importFails = 0;
-  for (let i = 0; i < MODULES.length; i++) {
-    const r = await runOne(MODULES[i], i);
+  for (let i = 0; i < ROWS.length; i++) {
+    if (ROWS[i].group) continue;
+    const r = await runOne(ROWS[i], i);
     if (r.importFailed) { importFails++; continue; }
     if (r.timeout) continue;
     modsRun++;
@@ -158,7 +173,7 @@ async function runAll() {
       `<b>${totPass}/${runnable}</b> pass (${runnable ? Math.round(100 * totPass / runnable) : 100}%), ` +
       `${totFail} fail, ${totSkip} skip` +
       (importFails ? ` &nbsp;|&nbsp; ${importFails} import-failed` : '') +
-      (i + 1 < MODULES.length ? ' &nbsp;·&nbsp; running…' : '');
+      (i + 1 < ROWS.length ? ' &nbsp;·&nbsp; running…' : '');
   }
 }
 
