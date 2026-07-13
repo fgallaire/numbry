@@ -23,6 +23,7 @@ const SC = process.argv[2];
 if (!SC) { console.error('usage: gen_scipy_vfs.mjs <scipy-1.14.1-src>'); process.exit(1); }
 const OUT = path.join(ROOT, 'build', 'scipy_ndimage_vfs.js');
 const OUT_SPECIAL = path.join(ROOT, 'build', 'scipy_special_vfs.js');
+const OUT_FFT = path.join(ROOT, 'build', 'scipy_fft_vfs.js');
 
 let scripts = { $timestamp: Date.now() };
 let n = 0, bytes = 0;
@@ -33,6 +34,38 @@ let n = 0, bytes = 0;
 const PATCH = {
   'scipy._lib._testutils': (s) => s.replace(
     "IS_EDITABLE = 'editable' in scipy.__path__[0]", 'IS_EDITABLE = False'),
+  // scipy.fft's public API is normally a uarray multimethod layer (_basic /
+  // _realtransforms / _fftlog) over the _uarray C extension — which defines
+  // static PyTypeObjects the handle bridge can't lay out. Every one of those
+  // modules ships a direct-pocketfft twin (_basic_backend / …_backend) with
+  // identical signatures, used whenever no alternative backend is registered.
+  // Bind the package to those twins and no-op the backend registry, so scipy.fft
+  // computes through pypocketfft without uarray.
+  'scipy.fft': (s) => s
+    .replace('from ._basic import (', 'from ._basic_backend import (')
+    .replace('from ._realtransforms import ', 'from ._realtransforms_backend import ')
+    // fht/ifht/fhtoffset (the FFTLog Hankel transform) pull scipy.special
+    // (loggamma/poch), which isn't in the fft bundle — stub them out.
+    .replace('from ._fftlog import fht, ifht, fhtoffset',
+             'def _fftlog_unavailable(*a, **k):\n' +
+             '    raise NotImplementedError("scipy.fft.fht/ifht need scipy.special, ' +
+             'not bundled here")\n' +
+             'fht = ifht = fhtoffset = _fftlog_unavailable'),
+  'scipy.fft._backend': () => [
+    '# uarray-free stub (see gen_scipy_vfs.mjs): the package binds to the direct',
+    '# _basic_backend path, so backend switching is a no-op here.',
+    'import contextlib',
+    'def set_global_backend(backend, coerce=False, only=False, *, try_last=False):',
+    '    pass',
+    'def register_backend(backend):',
+    '    pass',
+    '@contextlib.contextmanager',
+    'def set_backend(backend, coerce=False, only=False):',
+    '    yield',
+    '@contextlib.contextmanager',
+    'def skip_backend(backend):',
+    '    yield',
+    ''].join('\n'),
 };
 
 function add(mod, src, isInit) {
@@ -193,3 +226,20 @@ add('scipy.linalg',
 const blob2 = ';(function(){\nif(typeof __BRYTHON__==="undefined"){throw new Error("load brython.js first")}\n__BRYTHON__.update_VFS(' + JSON.stringify(scripts) + ');\n})();\n';
 fs.writeFileSync(OUT_SPECIAL, blob2);
 console.log('scipy.special VFS: ' + n + ' modules, ' + (bytes / 1048576).toFixed(1) + ' MB src, blob ' + (blob2.length / 1048576).toFixed(1) + ' MB -> ' + OUT_SPECIAL);
+
+// ---------------------------------------------------------------------------
+// Third blob: the scipy.fft Python layer + its suite (pairs with build/npfft.mjs
+// from fftbuild.sh). Self-contained — scipy.fft has no Fortran-wall deps.
+scripts = { $timestamp: Date.now() };
+n = 0; bytes = 0;
+walk(path.join(SC, 'scipy', 'fft'), 'scipy.fft');
+walk(path.join(SC, 'scipy', 'fft', 'tests'), 'scipy.fft.tests');
+// scipy.conftest (the test suite's shared fixtures) is a heavy pytest/hypothesis
+// module; the fft tests only pull `array_api_compatible` from it — which is just
+// a parametrize over the available array-api backends (numpy only, here).
+add('scipy.conftest',
+  'import pytest\nimport numpy as _np\n' +
+  'array_api_compatible = pytest.mark.parametrize("xp", [_np])\n', false);
+const blob3 = ';(function(){\nif(typeof __BRYTHON__==="undefined"){throw new Error("load brython.js first")}\n__BRYTHON__.update_VFS(' + JSON.stringify(scripts) + ');\n})();\n';
+fs.writeFileSync(OUT_FFT, blob3);
+console.log('scipy.fft VFS: ' + n + ' modules, ' + (bytes / 1048576).toFixed(1) + ' MB src, blob ' + (blob3.length / 1048576).toFixed(1) + ' MB -> ' + OUT_FFT);

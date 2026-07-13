@@ -116,6 +116,12 @@ echo "=== scipy.special (9 Fortran-free extensions) -> build/npsp.mjs ==="
 # special needs the Boost.Math headers (Faddeeva/wright) — vendored submodule
 git -C "$SC" submodule update --init --depth 1 scipy/_lib/boost_math
 CYTHON_PYTHONPATH="$CY" bash "$W/cython-support/spbuild.sh" "$SC" "$NP"
+echo "=== scipy.fft (pypocketfft pybind11) -> build/npfft.mjs ==="
+# fft's pocketfft backend header is a vendored submodule; the pybind11 headers
+# were installed above ($PYTOOLS). Reuses _ccallback_c/_pocketfft_umath objects
+# the ndimage phase already built, so it must run after ndbuild.
+git -C "$SC" submodule update --init --depth 1 scipy/_lib/pocketfft
+PYBIND11_INC="$PYTOOLS/pybind11/include" bash "$W/cython-support/fftbuild.sh" "$SC" "$NP"
 
 echo "=== matplotlib Agg + kiwisolver -> build/npmpl.mjs ==="
 # browser/Brython fixes for the Python layer (\N{...} escapes resolved,
@@ -145,11 +151,11 @@ node "$W/cython-support/gen_scipy_vfs.mjs" "$SC"
 
 echo "=== collect artifacts ==="
 mkdir -p "$HERE/build"
-for f in numpy_multiarray_umath nprnd npnd npsp nppd npmpl npsb; do
+for f in numpy_multiarray_umath nprnd npnd npsp npfft nppd npmpl npsb; do
   cp "$W/build/$f.mjs" "$W/build/$f.wasm" "$HERE/build/"
 done
 cp "$W"/build/numpy_vfs.js "$W"/build/pandas_vfs.js "$W"/build/scipy_ndimage_vfs.js \
-   "$W"/build/scipy_special_vfs.js \
+   "$W"/build/scipy_special_vfs.js "$W"/build/scipy_fft_vfs.js \
    "$W"/build/dateutil_zoneinfo_data.js "$W"/build/mpl_vfs.js "$W"/build/sb_vfs.js "$HERE/build/"
 rm -rf "$HERE/loader/brython"
 cp -r "$W/loader/brython" "$HERE/loader/brython"
