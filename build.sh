@@ -18,6 +18,7 @@ PANDAS_TAG="v2.2.3"
 SCIPY_TAG="v1.14.1"
 MPL_TAG="v3.9.2"
 SEABORN_TAG="v0.13.2"
+PILLOW_TAG="11.0.0"     # python-pillow/Pillow (PNG-only C core, no libjpeg/etc.)
 KIWI_TAG="1.4.7"        # nucleic/kiwi (kiwisolver's home repo)
 PYBIND11_PIN="2.13.6"   # EXACTLY: mplbuild.sh's header seds are calibrated on it
 CYTHON_COMMIT="1fcb9f4c0cb0a67148f5bb4551cf10571cb7b569"   # fgallaire/cython fix-argsslice-fastcall (3.3 master + ArgsSlice fix) — scipy
@@ -57,6 +58,7 @@ PD="$W/pandas-src"; pin https://github.com/pandas-dev/pandas "$PD" "$PANDAS_TAG"
 SC="$W/scipy-src";  pin https://github.com/scipy/scipy.git   "$SC" "$SCIPY_TAG"
 MPL="$W/matplotlib-src"; pin https://github.com/matplotlib/matplotlib.git "$MPL" "$MPL_TAG"
 SB="$W/seaborn-src"; pin https://github.com/mwaskom/seaborn.git "$SB" "$SEABORN_TAG"
+PIL="$W/pillow-src"; pin https://github.com/python-pillow/Pillow.git "$PIL" "$PILLOW_TAG"
 KIWI="$W/kiwisolver-src"; pin https://github.com/nucleic/kiwi.git "$KIWI" "$KIWI_TAG"
 CY="$W/cython-src";   pin https://github.com/fgallaire/cython.git "$CY" "$CYTHON_COMMIT"
 CY30="$W/cython30-src"; pin https://github.com/cython/cython.git "$CY30" "$CYTHON30_TAG"
@@ -123,6 +125,15 @@ echo "=== scipy.fft (pypocketfft pybind11) -> build/npfft.mjs ==="
 git -C "$SC" submodule update --init --depth 1 scipy/_lib/pocketfft
 PYBIND11_INC="$PYTOOLS/pybind11/include" bash "$W/cython-support/fftbuild.sh" "$SC" "$NP"
 
+echo "=== Pillow C core (PNG via zlib) -> build/nppil.mjs ==="
+# Pure C, hand-written C-API (no Cython/pybind11/Fortran). Standalone bundle:
+# needs only build/wasthon.o + the emscripten zlib port. pil_designate.py
+# rewrites Pillow's positional static PyTypeObjects to designated initializers
+# (the reordered bridge PyTypeObject needs them); the s*/y* PyArg buffer format
+# lands in the bridge (wasthon@main).
+bash "$W/cython-support/pilbuild.sh" "$PIL"
+node "$W/cython-support/gen_pil_vfs.mjs" "$PIL/src/PIL"
+
 echo "=== matplotlib Agg + kiwisolver -> build/npmpl.mjs ==="
 # browser/Brython fixes for the Python layer (\N{...} escapes resolved,
 # pickle_super-safe deepcopy, MPLCONFIGDIR trusted, pyparsing PEP-649…)
@@ -151,11 +162,11 @@ node "$W/cython-support/gen_scipy_vfs.mjs" "$SC"
 
 echo "=== collect artifacts ==="
 mkdir -p "$HERE/build"
-for f in numpy_multiarray_umath nprnd npnd npsp npfft nppd npmpl npsb; do
+for f in numpy_multiarray_umath nprnd npnd npsp npfft nppd npmpl npsb nppil; do
   cp "$W/build/$f.mjs" "$W/build/$f.wasm" "$HERE/build/"
 done
 cp "$W"/build/numpy_vfs.js "$W"/build/pandas_vfs.js "$W"/build/scipy_ndimage_vfs.js \
-   "$W"/build/scipy_special_vfs.js "$W"/build/scipy_fft_vfs.js \
+   "$W"/build/scipy_special_vfs.js "$W"/build/scipy_fft_vfs.js "$W"/build/pil_vfs.js \
    "$W"/build/dateutil_zoneinfo_data.js "$W"/build/mpl_vfs.js "$W"/build/sb_vfs.js "$HERE/build/"
 rm -rf "$HERE/loader/brython"
 cp -r "$W/loader/brython" "$HERE/loader/brython"
