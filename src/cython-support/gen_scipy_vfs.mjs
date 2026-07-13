@@ -223,6 +223,14 @@ add('scipy.linalg',
   '                A[j, j - off] = ab[k, j]\n' +
   '    return _np.linalg.eigvalsh(A)\n', true);
 
+// logsumexp / softmax / log_softmax go through scipy._lib._util._asarray_validated,
+// which (sparse_ok=False by default) does `import scipy.sparse; scipy.sparse.issparse(a)`
+// purely as a type guard rejecting sparse inputs. scipy.sparse is behind the Fortran
+// wall, and the only call here is that check — always False for ndarray inputs — so a
+// two-line stub unblocks all of _logsumexp (test_logsumexp + test_log_softmax).
+add('scipy.sparse',
+  'def issparse(x):\n    return False\nisspmatrix = issparse\n', true);
+
 const blob2 = ';(function(){\nif(typeof __BRYTHON__==="undefined"){throw new Error("load brython.js first")}\n__BRYTHON__.update_VFS(' + JSON.stringify(scripts) + ');\n})();\n';
 fs.writeFileSync(OUT_SPECIAL, blob2);
 console.log('scipy.special VFS: ' + n + ' modules, ' + (bytes / 1048576).toFixed(1) + ' MB src, blob ' + (blob2.length / 1048576).toFixed(1) + ' MB -> ' + OUT_SPECIAL);
