@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Wasthon — Pillow smoke test</title>
+<script src="./brython/brython.js"></script>
+<script src="./brython/brython_stdlib.js"></script>
+<!-- Pillow's PIL/ Python package (pure Python) as a Brython VFS -->
+<script src="../build/pil_vfs.js"></script>
+</head>
+<body>
+<p style="font-size:0.85em;margin:0 0 1em 0;"><a href="index.html">← back to index</a></p>
+<h1>Wasthon — Pillow smoke test</h1>
+<p style="color:#666;font-size:0.9em;max-width:72ch;">
+  Imports <b>Pillow 11.0.0</b> — its C core (<code>_imaging</code>: 4.5k lines +
+  68 <code>libImaging</code> files) compiled to wasm as a standalone bundle
+  (<code>nppil</code>, ~0.4&nbsp;MB, pure C / hand-written CPython C-API, no
+  Cython/pybind11/Fortran). PNG only: <code>ZipDecode</code>/<code>ZipEncode</code>
+  drive <code>zlib</code> directly. Exercises the four static <code>PyTypeObject</code>s
+  (ImagingCore / PixelAccess / ImagingDraw) and a real PNG round-trip.
+</p>
+<pre id="log" style="background:#f4f4f4;padding:1em;font-size:13px;line-height:1.4;"></pre>
+
+<script type="text/x-pillow-smoke" id="smoke">
+import PIL
+print("import PIL OK, Pillow " + PIL.__version__)
+from PIL import Image, ImageDraw, ImageChops
+print("import Image/ImageDraw OK")
+
+_ok = 0
+_fail = 0
+
+def check(name, fn):
+    global _ok, _fail
+    try:
+        r = fn()
+        _ok += 1
+        print("PASS " + name + " => " + str(r)[:70].replace("\n", " | "))
+    except BaseException as e:
+        _fail += 1
+        print("FAIL " + name + " " + type(e).__name__ + ": " + str(e)[:90])
+
+# --- ImagingCore (static type Imaging_Type): construction / pixels ---
+im = Image.new("RGB", (8, 6), (255, 0, 0))
+check("new+size", lambda: im.size)
+check("mode", lambda: im.mode)
+check("getpixel(0,0)=red", lambda: im.getpixel((0, 0)))
+def _put():
+    im.putpixel((1, 1), (0, 255, 0))
+    return im.getpixel((1, 1))
+check("putpixel/getpixel", _put)
+# --- PixelAccess (static type PixelAccess_Type): im.load() ---
+def _px():
+    px = im.load()
+    px[2, 2] = (0, 0, 255)
+    return px[2, 2]
+check("load()/PixelAccess", _px)
+
+# --- geometry / bands ---
+check("convert('L')", lambda: im.convert("L").mode)
+check("resize", lambda: im.resize((4, 3)).size)
+check("rotate(90)", lambda: im.rotate(90, expand=True).size)
+check("transpose", lambda: im.transpose(Image.Transpose.FLIP_LEFT_RIGHT).size)
+check("crop", lambda: im.crop((0, 0, 4, 3)).size)
+check("split->3 bands", lambda: len(im.split()))
+def _paste():
+    base = Image.new("RGB", (8, 6), (0, 0, 0))
+    base.paste(Image.new("RGB", (2, 2), (255, 255, 255)), (0, 0))
+    return base.getpixel((0, 0))
+check("paste", _paste)
+check("point", lambda: im.convert("L").point(lambda v: 255 - v).getpixel((0, 0)))
+check("histogram len", lambda: len(im.histogram()))
+
+# --- ImagingDraw (static type ImagingDraw_Type) ---
+def _draw():
+    d_im = Image.new("RGB", (16, 16), (0, 0, 0))
+    d = ImageDraw.Draw(d_im)
+    d.rectangle([2, 2, 10, 10], fill=(255, 0, 0), outline=(0, 255, 0))
+    d.line([0, 0, 15, 15], fill=(0, 0, 255), width=1)
+    d.ellipse([4, 4, 12, 12], outline=(255, 255, 0))
+    return d_im.getpixel((6, 6))
+check("ImageDraw rect/line/ellipse", _draw)
+
+# --- ImageChops (uses core arithmetic) ---
+check("ImageChops.invert", lambda: ImageChops.invert(im.convert("L")).getpixel((0, 0)))
+
+# --- PNG round-trip through zlib: ZipEncode -> ZipDecode ---
+import io
+def _png_save():
+    buf = io.BytesIO()
+    Image.new("RGB", (32, 24), (10, 20, 30)).save(buf, "PNG")
+    b = buf.getvalue()
+    assert b[:8] == b"\x89PNG\r\n\x1a\n", "bad PNG signature"
+    return len(b)
+check("save PNG (ZipEncode/zlib)", _png_save)
+
+def _png_roundtrip():
+    src = Image.new("RGB", (20, 15), (77, 88, 99))
+    src.putpixel((5, 5), (1, 2, 3))
+    buf = io.BytesIO(); src.save(buf, "PNG")
+    buf.seek(0)
+    out = Image.open(buf); out.load()      # ZipDecode
+    assert out.size == (20, 15), "size mismatch " + str(out.size)
+    assert out.getpixel((5, 5)) == (1, 2, 3), "pixel mismatch " + str(out.getpixel((5, 5)))
+    assert out.getpixel((0, 0)) == (77, 88, 99), "bg mismatch"
+    return (out.size, out.getpixel((5, 5)))
+check("PNG round-trip exact (ZipDecode)", _png_roundtrip)
+
+# --- tobytes / frombytes ---
+def _raw():
+    src = Image.new("RGB", (4, 4), (12, 34, 56))
+    raw = src.tobytes()
+    back = Image.frombytes("RGB", (4, 4), raw)
+    return back.getpixel((3, 3))
+check("tobytes/frombytes", _raw)
+
+print("ran = " + str(_ok + _fail))
+print("passed = " + str(_ok))
+print("failed+errored = " + str(_fail))
+print(str(_ok) + "/" + str(_ok + _fail) + " checks passed")
+</script>
+
+<script type="module">
+const logEl = document.getElementById('log');
+const log = (s) => { logEl.textContent += s + '\n'; };
+
+const $B = window.__BRYTHON__;
+globalThis.$B = $B;
+globalThis.__BRYTHON__ = $B;
+globalThis._b_ = $B.builtins;
+
+// The three compiled modules living in the standalone nppil wasm.
+const PIL_C = {
+  'PIL._imaging':      '_PyInit__imaging',
+  'PIL._imagingmath':  '_PyInit__imagingmath',
+  'PIL._imagingmorph': '_PyInit__imagingmorph',
+};
+
+try {
+  log('loading Pillow C core (nppil) wasm…');
+  const factory = (await import('../build/nppil.mjs')).default;
+  const M = await factory();
+  M._wasthon_init();
+
+  const orig = $B.$__import__;
+  function runC(fullname, pyinit) {
+    if ($B.imported[fullname] !== undefined) return true;
+    const parts = fullname.split('.');
+    const parent = parts.slice(0, -1).join('.');
+    if (parent && $B.imported[parent] === undefined) {
+      try { orig(parent, {}, {}, [], 0); } catch(e){}
+    }
+    if ($B.imported[fullname] !== undefined) return true;
+    const def = M[pyinit]();
+    if (def === 0) { log('  [C] ' + fullname + ' PyInit returned NULL'); return false; }
+    let mod = null;
+    try { if (!M.wasthon.moduleDefs.get(def)) mod = M.wasthon.handles.get(def); } catch(e){}
+    if (!mod) {
+      try { const di = M.wasthon.moduleDefs.get(def); if (di) di.name = fullname; } catch(e){}
+      const cmod = M._wasthon_module_create(def);
+      if (cmod === 0) {
+        const pe = M.wasthon && M.wasthon.pendingException;
+        let pm = '(silent)';
+        if (pe) {
+          try { pm = String(_b_.str.$factory(pe.value || pe.msg)); } catch(e) { pm = String(pe.msg); }
+          try { pm = ($B.class_name(pe.value || M.wasthon.unwrap(pe.exc)) || '') + ': ' + pm; } catch(e){}
+        }
+        log('  [C] ' + fullname + ' init FAILED: ' + String(pm).slice(0, 200));
+        return false;
+      }
+      mod = M.wasthon.handles.get(cmod);
+    } else {
+      try { $B.str_dict_set($B.get_dict(mod), '__name__', fullname); } catch(e){}
+    }
+    $B.imported[fullname] = mod;
+    if (parent) { try { $B.str_dict_set($B.get_dict($B.imported[parent]), parts[parts.length - 1], mod); } catch(e){} }
+    return true;
+  }
+
+  $B.$__import__ = function(mod_name, globals, locals, fromlist, level) {
+    try {
+      if (level > 0 && fromlist) {
+        // `from . import _imaging as core` — target is in the from-list.
+        for (const f of fromlist) {
+          const fn = typeof f === 'string' ? f : null;
+          if (fn) for (const k in PIL_C) if (k.endsWith('.' + fn)) runC(k, PIL_C[k]);
+        }
+      }
+      if (typeof mod_name === 'string') {
+        if (PIL_C[mod_name]) runC(mod_name, PIL_C[mod_name]);
+        if (fromlist && fromlist.length) for (const f of fromlist) {
+          const sub = mod_name + '.' + (typeof f === 'string' ? f : $B.$getattr(f, '__name__', f));
+          if (PIL_C[sub]) runC(sub, PIL_C[sub]);
+        }
+      }
+    } catch(e) { console.warn('import hook:', e); }
+    return orig.apply(this, arguments);
+  };
+
+  const smokeSrc = document.getElementById('smoke').textContent;
+  const origConsole = console.log;
+  console.log = (...a) => { logEl.textContent += a.map(x => typeof x === 'string' ? x : String(x)).join(' '); };
+  const t0 = performance.now();
+  try { $B.runPythonSource(smokeSrc, 'pillow_smoke'); }
+  finally { console.log = origConsole; }
+  log('(' + (performance.now() - t0).toFixed(0) + ' ms)');
+  log('=== done ===');
+} catch(e) {
+  log('BOOT FAILED: ' + (e && (e.args ? String(e.args[0]) : (e.stack || e.message || e))));
+  log('=== done ===');
+  console.error(e);
+}
+</script>
+</body>
+</html>

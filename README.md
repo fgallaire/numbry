@@ -1,16 +1,16 @@
 # NumBry
 
-**The scientific Python stack — real NumPy, pandas, SciPy, matplotlib and
-seaborn — running in the browser**, on top of
+**The scientific Python stack — real NumPy, pandas, SciPy, matplotlib,
+seaborn and Pillow — running in the browser**, on top of
 [Brython](https://github.com/brython-dev/brython) through the
 [Wasthon](https://github.com/fgallaire/wasthon) C-API bridge.
 
 Not reimplementations: the upstream C/Cython/C++ extension modules themselves
 (numpy's `_multiarray_umath` + f2c'd LAPACK-lite, the 9 `numpy.random` Cython
 modules, the 43 `pandas._libs` extensions, scipy.ndimage's
-`_nd_image`/`_ni_label`, matplotlib's Agg renderer + FreeType + kiwisolver)
-compiled to WebAssembly, with each package's own pure-Python layer served as a
-Brython VFS.
+`_nd_image`/`_ni_label`, matplotlib's Agg renderer + FreeType + kiwisolver,
+Pillow's `_imaging` core + 68 `libImaging` codecs) compiled to WebAssembly,
+with each package's own pure-Python layer served as a Brython VFS.
 
 Validated against the upstream projects' **own test suites**, run in-browser:
 
@@ -22,20 +22,22 @@ Validated against the upstream projects' **own test suites**, run in-browser:
   `buffer_rgba()` onto a canvas
 - **seaborn 0.13.2** — lineplot/histplot/kdeplot/regplot on the full stack in
   ONE wasm module, with live `np.linalg` (cholesky/inv/det, pinv)
+- **Pillow 11.0.0** — the `_imaging` C core in wasm, PNG read/write via zlib:
+  new/convert/resize/rotate/ImageDraw + pixel-exact PNG round-trip (19/19 smoke)
 
 ## Layout
 
 - `src/numpy-probe/` — the numpy C-core build recipe (codegen + compile), the
   f2c'd LAPACK-lite build, and the numpy VFS generator.
 - `src/cython-support/` — the per-package recipes (`nprnd.sh`, `pdbuild.sh`,
-  `ndbuild.sh`, `mplbuild.sh`, `sblink.sh`), the pandas/scipy/matplotlib/seaborn
-  VFS generators and the browser stubs. At build time these overlay the
+  `ndbuild.sh`, `mplbuild.sh`, `sblink.sh`, `pilbuild.sh`), the pandas/scipy/
+  matplotlib/seaborn/pillow VFS generators and the browser stubs. At build time these overlay the
   **generic** `cython-support/` layer that ships with Wasthon (compat headers,
   `cybuild.sh`, the Cython js-library).
 - `loader/` — the pages: suite dashboards (`test-*-all.html`), single-module
   runners and smoke tests, indexed by `index.html`.
 - `build.sh` — clones wasthon@main (bridge + Brython + generic support layer),
-  pins numpy/pandas/scipy/matplotlib/seaborn/Cython to exact releases, builds
+  pins numpy/pandas/scipy/matplotlib/seaborn/Pillow/Cython to exact releases, builds
   everything from source. **No committed blobs**: artifacts land in `build/`
   (git-ignored).
 
