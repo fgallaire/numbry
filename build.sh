@@ -112,6 +112,10 @@ echo "=== pandas._libs (43 extensions) -> build/nppd.mjs ==="
 CYTHON_PYTHONPATH="$CY30" bash "$W/cython-support/pdbuild.sh" "$PD" "$NP"
 echo "=== scipy.ndimage -> build/npnd.mjs ==="
 CYTHON_PYTHONPATH="$CY" bash "$W/cython-support/ndbuild.sh" "$SC" "$NP"
+echo "=== scipy.special (9 Fortran-free extensions) -> build/npsp.mjs ==="
+# special needs the Boost.Math headers (Faddeeva/wright) — vendored submodule
+git -C "$SC" submodule update --init --depth 1 scipy/_lib/boost_math
+CYTHON_PYTHONPATH="$CY" bash "$W/cython-support/spbuild.sh" "$SC" "$NP"
 
 echo "=== matplotlib Agg + kiwisolver -> build/npmpl.mjs ==="
 # browser/Brython fixes for the Python layer (\N{...} escapes resolved,
@@ -141,10 +145,11 @@ node "$W/cython-support/gen_scipy_vfs.mjs" "$SC"
 
 echo "=== collect artifacts ==="
 mkdir -p "$HERE/build"
-for f in numpy_multiarray_umath nprnd npnd nppd npmpl npsb; do
+for f in numpy_multiarray_umath nprnd npnd npsp nppd npmpl npsb; do
   cp "$W/build/$f.mjs" "$W/build/$f.wasm" "$HERE/build/"
 done
 cp "$W"/build/numpy_vfs.js "$W"/build/pandas_vfs.js "$W"/build/scipy_ndimage_vfs.js \
+   "$W"/build/scipy_special_vfs.js \
    "$W"/build/dateutil_zoneinfo_data.js "$W"/build/mpl_vfs.js "$W"/build/sb_vfs.js "$HERE/build/"
 rm -rf "$HERE/loader/brython"
 cp -r "$W/loader/brython" "$HERE/loader/brython"

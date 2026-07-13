@@ -22,8 +22,9 @@ const ROOT = path.resolve(HERE, '..');
 const SC = process.argv[2];
 if (!SC) { console.error('usage: gen_scipy_vfs.mjs <scipy-1.14.1-src>'); process.exit(1); }
 const OUT = path.join(ROOT, 'build', 'scipy_ndimage_vfs.js');
+const OUT_SPECIAL = path.join(ROOT, 'build', 'scipy_special_vfs.js');
 
-const scripts = { $timestamp: Date.now() };
+let scripts = { $timestamp: Date.now() };
 let n = 0, bytes = 0;
 
 // Per-module source patches: Brython gives a VFS package `__path__` the string
@@ -152,3 +153,43 @@ add('ctypes',
 const blob = ';(function(){\nif(typeof __BRYTHON__==="undefined"){throw new Error("load brython.js first")}\n__BRYTHON__.update_VFS(' + JSON.stringify(scripts) + ');\n})();\n';
 fs.writeFileSync(OUT, blob);
 console.log('scipy.ndimage VFS: ' + n + ' modules, ' + (bytes / 1048576).toFixed(1) + ' MB src, blob ' + (blob.length / 1048576).toFixed(1) + ' MB -> ' + OUT);
+
+// ---------------------------------------------------------------------------
+// Second, ADDITIVE blob: the real scipy.special Python layer + its test suite
+// (pairs with build/npsp.mjs from spbuild.sh). Loaded by the special pages
+// AFTER the ndimage blob, so its real 'scipy.special' entry overrides the
+// sindg/cosdg stub above (update_VFS warns on the duplicate, then replaces).
+scripts = { $timestamp: Date.now() };
+n = 0; bytes = 0;
+walk(path.join(SC, 'scipy', 'special'), 'scipy.special');
+walk(path.join(SC, 'scipy', 'special', 'tests'), 'scipy.special.tests');
+
+// The ONE real scipy.linalg consumer in special's Python layer is
+// _orthogonal.py's `linalg.eigvals_banded(c, overwrite_a_band=True)` (the
+// Golub-Welsch quadrature nodes; every other `from scipy import …` hit is a
+// docstring). scipy.linalg itself is behind the Fortran wall, so serve that
+// single function on numpy: densify the symmetric band, np.linalg.eigvalsh
+// (same ascending order as LAPACK).
+add('scipy.linalg',
+  'import numpy as _np\n' +
+  'def eigvals_banded(a_band, lower=False, overwrite_a_band=False,\n' +
+  '                   select="a", select_range=None, max_ev=0, check_finite=True):\n' +
+  '    ab = _np.asarray(a_band, dtype=float)\n' +
+  '    u = ab.shape[0] - 1\n' +
+  '    n = ab.shape[1]\n' +
+  '    A = _np.zeros((n, n))\n' +
+  '    for k in range(u + 1):\n' +
+  '        if lower:\n' +
+  '            for j in range(n - k):\n' +
+  '                A[j + k, j] = ab[k, j]\n' +
+  '                A[j, j + k] = ab[k, j]\n' +
+  '        else:\n' +
+  '            off = u - k\n' +
+  '            for j in range(off, n):\n' +
+  '                A[j - off, j] = ab[k, j]\n' +
+  '                A[j, j - off] = ab[k, j]\n' +
+  '    return _np.linalg.eigvalsh(A)\n', true);
+
+const blob2 = ';(function(){\nif(typeof __BRYTHON__==="undefined"){throw new Error("load brython.js first")}\n__BRYTHON__.update_VFS(' + JSON.stringify(scripts) + ');\n})();\n';
+fs.writeFileSync(OUT_SPECIAL, blob2);
+console.log('scipy.special VFS: ' + n + ' modules, ' + (bytes / 1048576).toFixed(1) + ' MB src, blob ' + (blob2.length / 1048576).toFixed(1) + ' MB -> ' + OUT_SPECIAL);
