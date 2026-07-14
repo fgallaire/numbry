@@ -24,7 +24,17 @@ OUT="$ROOT/build/sp-obj"; mkdir -p "$OUT"
 cd "$ROOT" && source external/emsdk/emsdk_env.sh >/dev/null 2>&1
 
 SP="$ND/scipy/special"
-PP="-DCYTHON_USE_TYPE_SPECS=1 -DCYTHON_USE_MODULE_STATE=0 -DCYTHON_FAST_THREAD_STATE=0 -DCYTHON_USE_EXC_INFO_STACK=0 -DCYTHON_USE_TYPE_SLOTS=0 -DCYTHON_USE_PYTYPE_LOOKUP=0 -DCYTHON_USE_UNICODE_INTERNALS=0 -DCYTHON_USE_PYLONG_INTERNALS=0 -DCYTHON_USE_PYLIST_INTERNALS=0 -DCYTHON_ASSUME_SAFE_MACROS=0 -DCYTHON_UNPACK_METHODS=0 -DCYTHON_AVOID_BORROWED_REFS=1 -DPy_OptimizeFlag=0"
+# -DCYTHON_CCOMPLEX=0: build complex values by FIELD ASSIGNMENT, not arithmetic.
+# With CCOMPLEX=1 in a C TU, Cython emits
+#     from_parts(x, y) { return x + y*(double _Complex)_Complex_I; }
+# and clang/wasm does NOT fold `y*I` into a component swap — it emits a real
+# complex multiply, which propagates NaN into BOTH parts and annihilates signed
+# zeros (verified standalone under emcc: from_parts(-inf, nan) -> (nan, nan);
+# from_parts(-0.0, 0.0) -> (+0.0, 0.0)). scipy's special-value paths depend on
+# exactly those constructions — sici/shichi at z=0 do `zpack(-INFINITY, NAN)`
+# and wrightomega returns `complex(-0.0, 0.0)` between branches. The struct
+# fallback (`z.real = x; z.imag = y;`) is exact.
+PP="-DCYTHON_USE_TYPE_SPECS=1 -DCYTHON_USE_MODULE_STATE=0 -DCYTHON_FAST_THREAD_STATE=0 -DCYTHON_USE_EXC_INFO_STACK=0 -DCYTHON_USE_TYPE_SLOTS=0 -DCYTHON_USE_PYTYPE_LOOKUP=0 -DCYTHON_USE_UNICODE_INTERNALS=0 -DCYTHON_USE_PYLONG_INTERNALS=0 -DCYTHON_USE_PYLIST_INTERNALS=0 -DCYTHON_ASSUME_SAFE_MACROS=0 -DCYTHON_UNPACK_METHODS=0 -DCYTHON_AVOID_BORROWED_REFS=1 -DPy_OptimizeFlag=0 -DCYTHON_CCOMPLEX=0"
 # $OUT/inc shadows scipy's lapack_defs.h (written below): the real one pulls
 # numpy's whole npy_cblas.h, which assumes numpy internals are already
 # included; all special needs from LAPACK is the one dstevr prototype.
