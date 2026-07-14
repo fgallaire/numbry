@@ -52,7 +52,17 @@ N=$(grep -c 'error:' "$OUT/pypocketfft_cc.txt" || true)
 if [ "$N" != 0 ]; then echo "pypocketfft: errors=$N"; grep -m5 'error:' "$OUT/pypocketfft_cc.txt"; exit 1; fi
 echo "pypocketfft: OK"
 
-# link stubs for pybind11's error/traceback + import machinery (see fft_stub.c)
+# fft_stub.c is compiled for reference but NOT linked: every symbol it defines
+# (PyModule_GetName, PyImport_GetModule, PyVectorcall_Function, the exc-info /
+# traceback set) is now provided CORRECTLY by cython_support.js. Linked, its
+# hard (T) definitions WIN over the js-library ones under
+# --allow-multiple-definition, and its PyModule_GetName returns "" — so
+# numpy.random._generator (which calls PyModule_GetName 5x at init) registered
+# under an empty name and its module-exec slot returned -1 ("without setting an
+# exception"), poisoning `import numpy.random` on this bundle. Anything
+# cython_support.js does NOT provide falls back to a lazy throw-stub
+# (ERROR_ON_UNDEFINED_SYMBOLS=0), only hit on pybind11's error path.
+# # link stubs for pybind11's error/traceback + import machinery (see fft_stub.c)
 emcc -O1 -c -I "$SRC" "$CS/fft_stub.c" -o "$OUT/fft_stub.o" 2>"$OUT/fft_stub_cc.txt"
 N=$(grep -c 'error:' "$OUT/fft_stub_cc.txt" || true)
 if [ "$N" != 0 ]; then echo "fft_stub: errors=$N"; grep -m5 'error:' "$OUT/fft_stub_cc.txt"; exit 1; fi
@@ -77,7 +87,7 @@ NR="$ROOT/build/nprnd-obj"
 EXP='"_PyInit__multiarray_umath","_wasthon_init","_wasthon_module_create","_malloc","_free","_PyInit__common","_PyInit_bit_generator","_PyInit__mt19937","_PyInit__philox","_PyInit__pcg64","_PyInit__sfc64","_PyInit__bounded_integers","_PyInit__generator","_PyInit_mtrand","_PyInit_pypocketfft","_PyInit__ccallback_c","_PyInit__pocketfft_umath"'
 CY="$NR/_common.o $NR/bit_generator.o $NR/_mt19937.o $NR/_philox.o $NR/_pcg64.o $NR/_sfc64.o $NR/_bounded_integers.o $NR/_generator.o $NR/mtrand.o"
 ALGO="$NR/mt19937.o $NR/mt19937-jump.o $NR/philox.o $NR/pcg64.o $NR/sfc64.o $NR/legacy-distributions.o"
-emcc -O1 "$ROOT"/numpy-probe/obj/*.o "$ROOT/build/wasthon.o" "$NR/tanh_stub.o" $CY $ALGO "$NR"/npyrandom/*.o "$OUT/pypocketfft.o" "$OUT/fft_stub.o" "$CCB" "$PFU" \
+emcc -O1 "$ROOT"/numpy-probe/obj/*.o "$ROOT/build/wasthon.o" "$NR/tanh_stub.o" $CY $ALGO "$NR"/npyrandom/*.o "$OUT/pypocketfft.o" "$CCB" "$PFU" \
   --js-library "$SRC/wasthon.js" --js-library "$CS/cython_support.js" \
   -s ALLOW_MEMORY_GROWTH=1 -s ALLOW_TABLE_GROWTH=1 -sSTACK_SIZE=5242880 --profiling-funcs \
   -Wl,--allow-multiple-definition -s EXPORTED_FUNCTIONS="[$EXP]" \

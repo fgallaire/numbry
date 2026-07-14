@@ -37,10 +37,9 @@ import pytest as _pt
 import os as _os
 if not hasattr(_os, "cpu_count"):
     _os.cpu_count = lambda: 1
-# NOTE: numpy.random is NOT importable on this bundle — its Generator C module
-# fails to init, and touching it poisons later imports — so the suite's
-# random-data test modules (test_basic/test_real_transforms) don't import here.
-# Left as a known numpy.random plumbing gap, tracked separately.
+# numpy.random imports fine here (its C modules share this bundle). The
+# random-data suites test_basic/test_real_transforms still aren't wired: the
+# former needs a page fix, the latter pulls scipy.fftpack (not ported).
 
 def _expand_params(params):
     if not params:
