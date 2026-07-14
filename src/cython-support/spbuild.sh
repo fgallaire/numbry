@@ -44,7 +44,11 @@ CFLAGS="-O1 -c -DNDEBUG -DPy_PYTHON_H -DNPY_NO_DEPRECATED_API=0 -DCYTHON_VECTORC
 # scipy_compat.h is extern "C"-guarded, so give the C++ TUs the same
 # recipe-level shims the C TUs get (Py_tp_base, GenericSetDict, PyUnicode_Equal…);
 # sp_compat.h then only carries the handful missing from BOTH.
-CXXFLAGS="-O1 -c -std=c++17 -DNDEBUG -DPy_PYTHON_H -DNPY_NO_DEPRECATED_API=0 -DCYTHON_VECTORCALL_TPNEW=0 $PP -Wno-macro-redefined -include $SRC/patchlevel.h -include $CS/cython_compat.h -include $CS/scipy_compat.h -include $CS/sp_compat.h $SPINC"
+# -fwasm-exceptions (also at link): Boost.Math wrappers throw on domain/
+# overflow and catch in-function (boost_special_functions.h erfinv_wrap);
+# emscripten's default turns any throw into abort() before the catch —
+# cython_special erfinv(±10) killed the wasm runtime mid-suite.
+CXXFLAGS="-O1 -c -std=c++17 -fwasm-exceptions -DNDEBUG -DPy_PYTHON_H -DNPY_NO_DEPRECATED_API=0 -DCYTHON_VECTORCALL_TPNEW=0 $PP -Wno-macro-redefined -include $SRC/patchlevel.h -include $CS/cython_compat.h -include $CS/scipy_compat.h -include $CS/sp_compat.h $SPINC"
 
 mkdir -p "$OUT/inc"
 cat > "$OUT/inc/lapack_defs.h" <<'EOF'
@@ -200,7 +204,7 @@ NR="$ROOT/build/nprnd-obj"; LA="$ROOT/build/linalg-obj"
 EXP='"_PyInit__multiarray_umath","_PyInit__umath_linalg","_wasthon_init","_wasthon_module_create","_malloc","_free","_PyInit__common","_PyInit_bit_generator","_PyInit__mt19937","_PyInit__philox","_PyInit__pcg64","_PyInit__sfc64","_PyInit__bounded_integers","_PyInit__generator","_PyInit_mtrand","_PyInit__pocketfft_umath","_PyInit__ccallback_c","_PyInit__ufuncs","_PyInit__ufuncs_cxx","_PyInit__special_ufuncs","_PyInit__gufuncs","_PyInit__specfun","_PyInit_cython_special","_PyInit__comb","_PyInit__ellip_harm_2","_PyInit__test_internal"'
 CY="$NR/_common.o $NR/bit_generator.o $NR/_mt19937.o $NR/_philox.o $NR/_pcg64.o $NR/_sfc64.o $NR/_bounded_integers.o $NR/_generator.o $NR/mtrand.o"
 ALGO="$NR/mt19937.o $NR/mt19937-jump.o $NR/philox.o $NR/pcg64.o $NR/sfc64.o $NR/legacy-distributions.o"
-emcc -O1 "$ROOT"/numpy-probe/obj/*.o "$LA"/*.o "$ROOT/build/wasthon.o" "$NR/tanh_stub.o" $CY $ALGO "$NR"/npyrandom/*.o "$OUT"/*.o \
+emcc -O1 -fwasm-exceptions "$ROOT"/numpy-probe/obj/*.o "$LA"/*.o "$ROOT/build/wasthon.o" "$NR/tanh_stub.o" $CY $ALGO "$NR"/npyrandom/*.o "$OUT"/*.o \
   --js-library "$SRC/wasthon.js" --js-library "$CS/cython_support.js" \
   -s ALLOW_MEMORY_GROWTH=1 -s ALLOW_TABLE_GROWTH=1 -sSTACK_SIZE=5242880 --profiling-funcs \
   -Wl,--allow-multiple-definition -s EXPORTED_FUNCTIONS="[$EXP]" \
