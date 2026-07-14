@@ -57,4 +57,25 @@ static PyObject *_PyStack_AsDict(PyObject *const *values, PyObject *kwnames)
 #undef PyComplex_CheckExact
 #define PyComplex_CheckExact(op) 0
 
+/* WebAssembly has NO rounding-mode control: its float instructions are
+   specified as round-to-nearest-even, with no mode register to set. But
+   emscripten's musl ships fenv.c — literally titled "Dummy functions for archs
+   lacking fenv implementation" — whose __fesetround() returns 0 (success) and
+   does nothing. scipy's have_fenv() believes it, so test_add_round_{up,down}
+   run and mismatch on ~50% of samples (49986/100000) — the exact signature of a
+   rounding mode being ignored.
+
+   Report the platform truthfully: only FE_TONEAREST is achievable. have_fenv()
+   then returns False and scipy's own
+   `@pytest.mark.skipif(not have_fenv(), reason="no fenv()")` skips those tests —
+   which is what upstream does on any fenv-less platform (scipy's _round.h even
+   carries the same fallback: `int fesetround(int){ return -1; }`).
+
+   fenv.h is pulled in HERE so the real declaration is seen before the macro
+   exists; the TU's own `#include <fenv.h>` is then a no-op (include guard) and
+   only call sites expand. Sole caller in this build: _test_internal. */
+#include <fenv.h>
+#undef fesetround
+#define fesetround(r) ((r) == FE_TONEAREST ? 0 : -1)
+
 #endif
