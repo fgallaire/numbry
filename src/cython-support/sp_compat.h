@@ -48,4 +48,13 @@ static PyObject *_PyStack_AsDict(PyObject *const *values, PyObject *kwnames)
     do { Py_XDECREF(t); Py_XDECREF(v); Py_XDECREF(tb); } while (0)
 #endif
 
+/* Cython reads an *exact* Python complex through the raw C struct field
+   ((PyComplexObject *)o)->cval — garbage under the handle-based bridge, where o
+   is a handle, not a C PyComplexObject in linear memory. Force the CheckExact
+   fast-path off so Cython's __Pyx_PyComplex_As_* falls to PyComplex_AsCComplex,
+   which the bridge implements correctly (reads the Brython complex real/imag).
+   Fixes every cython_special function taking a complex (D) argument. */
+#undef PyComplex_CheckExact
+#define PyComplex_CheckExact(op) 0
+
 #endif
