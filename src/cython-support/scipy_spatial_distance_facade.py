@@ -84,18 +84,75 @@ def _resolve(metric):
     return _METRICS[m]
 
 
+# ---- per-ROW vectorised distances -------------------------------------------
+# One Python loop over the FIRST axis (O(m) iterations, not O(m^2) pairs), each
+# row computed with numpy over the other set. This is fast (vectorised inner)
+# AND memory-bounded O(k*d) per row — the full (m, m, d) broadcast would blow
+# the wasm heap on the larger datasets scipy.cluster's hierarchy tests use
+# (that regression is exactly what this replaces).
+
+def _row_dist(xi, Y, name, **kw):
+    """Distance from one point xi (d,) to every row of Y (k, d) -> (k,)."""
+    d = xi - Y
+    ad = np.abs(d)
+    if name in ('euclidean', 'l2'):
+        return np.sqrt((d * d).sum(1))
+    if name == 'sqeuclidean':
+        return (d * d).sum(1)
+    if name in ('cityblock', 'manhattan', 'l1'):
+        return ad.sum(1)
+    if name in ('chebyshev', 'chebychev', 'inf'):
+        return ad.max(1) if ad.size else np.zeros(Y.shape[0])
+    if name == 'minkowski':
+        p = kw.get('p', 2)
+        return (ad ** p).sum(1) ** (1.0 / p)
+    if name == 'cosine':
+        ny = np.linalg.norm(Y, axis=1)
+        with np.errstate(invalid='ignore', divide='ignore'):
+            return 1.0 - (Y @ xi) / (np.linalg.norm(xi) * ny)
+    if name == 'correlation':
+        xm = xi - xi.mean()
+        Ym = Y - Y.mean(axis=1, keepdims=True)
+        with np.errstate(invalid='ignore', divide='ignore'):
+            return 1.0 - (Ym @ xm) / (np.linalg.norm(xm)
+                                      * np.linalg.norm(Ym, axis=1))
+    if name == 'hamming':
+        return (xi != Y).mean(1)
+    if name == 'braycurtis':
+        with np.errstate(invalid='ignore', divide='ignore'):
+            return ad.sum(1) / np.abs(xi + Y).sum(1)
+    if name == 'canberra':
+        s = np.abs(xi) + np.abs(Y)
+        with np.errstate(invalid='ignore', divide='ignore'):
+            return np.where(s != 0, ad / s, 0.0).sum(1)
+    if name == 'jaccard':
+        nz = (xi != 0) | (Y != 0)
+        num = ((xi != Y) & nz).sum(1)
+        den = nz.sum(1)
+        with np.errstate(invalid='ignore', divide='ignore'):
+            return np.where(den != 0, num / den, 0.0)
+    return None  # unknown built-in -> caller falls back to the callable loop
+
+
 def pdist(X, metric='euclidean', *, out=None, **kwargs):
     X = np.asarray(X, dtype=float)
     if X.ndim != 2:
         raise ValueError("A 2-dimensional array must be passed.")
     m = X.shape[0]
-    f = _resolve(metric)
     dm = np.empty(m * (m - 1) // 2, dtype=float)
+    name = metric.lower() if isinstance(metric, str) else None
     k = 0
-    for i in range(m - 1):
-        for j in range(i + 1, m):
-            dm[k] = f(X[i], X[j], **kwargs) if kwargs else f(X[i], X[j])
-            k += 1
+    if m >= 2 and name is not None and _row_dist(X[0], X[1:2], name, **kwargs) is not None:
+        for i in range(m - 1):
+            n = m - i - 1
+            dm[k:k + n] = _row_dist(X[i], X[i + 1:], name, **kwargs)
+            k += n
+    else:                                    # custom callable metric
+        f = _resolve(metric)
+        for i in range(m - 1):
+            for j in range(i + 1, m):
+                dm[k] = f(X[i], X[j], **kwargs) if kwargs else f(X[i], X[j])
+                k += 1
     return dm
 
 
@@ -106,12 +163,17 @@ def cdist(XA, XB, metric='euclidean', *, out=None, **kwargs):
         raise ValueError("XA and XB must be 2-dimensional arrays.")
     if XA.shape[1] != XB.shape[1]:
         raise ValueError("XA and XB must have the same number of columns.")
-    f = _resolve(metric)
-    mA, mB = XA.shape[0], XB.shape[0]
-    dm = np.empty((mA, mB), dtype=float)
-    for i in range(mA):
-        for j in range(mB):
-            dm[i, j] = f(XA[i], XB[j], **kwargs) if kwargs else f(XA[i], XB[j])
+    mA = XA.shape[0]
+    dm = np.empty((mA, XB.shape[0]), dtype=float)
+    name = metric.lower() if isinstance(metric, str) else None
+    if name is not None and _row_dist(XA[0], XB, name, **kwargs) is not None:
+        for i in range(mA):
+            dm[i] = _row_dist(XA[i], XB, name, **kwargs)
+    else:
+        f = _resolve(metric)
+        for i in range(mA):
+            for j in range(XB.shape[0]):
+                dm[i, j] = f(XA[i], XB[j], **kwargs) if kwargs else f(XA[i], XB[j])
     return dm
 
 

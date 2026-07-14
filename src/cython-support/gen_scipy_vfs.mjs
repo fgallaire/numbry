@@ -197,6 +197,14 @@ scripts = { $timestamp: Date.now() };
 n = 0; bytes = 0;
 walk(path.join(SC, 'scipy', 'special'), 'scipy.special');
 walk(path.join(SC, 'scipy', 'special', 'tests'), 'scipy.special.tests');
+// scipy.constants is pure Python (no extension, no Fortran) — ride the special
+// bundle (numpy + scipy._lib) rather than a bundle of its own.
+walk(path.join(SC, 'scipy', 'constants'), 'scipy.constants');
+walk(path.join(SC, 'scipy', 'constants', 'tests'), 'scipy.constants.tests');
+// its tests (and some special tests) pull array_api_compatible from conftest.
+add('scipy.conftest',
+  'import pytest\nimport numpy as _np\n' +
+  'array_api_compatible = pytest.mark.parametrize("xp", [_np])\n', false);
 
 // scipy.linalg is behind the Fortran wall (real .f compiled by gfortran, which
 // this wasm toolchain has no frontend for). But the functions scipy.special /
@@ -254,6 +262,15 @@ add('scipy.linalg',
 add('scipy.spatial', 'from . import distance\n', true);
 add('scipy.spatial.distance',
   fs.readFileSync(path.join(HERE, 'scipy_spatial_distance_facade.py'), 'utf8'), false);
+// scipy.sparse is behind the Fortran wall; cluster's tests only touch
+// issparse (type guard) and _sputils.matrix (np.matrix view helper).
+add('scipy.sparse',
+  'def issparse(x):\n    return False\nisspmatrix = issparse\n', true);
+add('scipy.sparse._sputils',
+  'import numpy as _np\n' +
+  'def matrix(*a, **k):\n    return _np.array(*a, **k).view(_np.matrix)\n' +
+  'def asmatrix(data, dtype=None):\n    return _np.asarray(data, dtype=dtype).view(_np.matrix)\n' +
+  'def isdense(x):\n    return isinstance(x, _np.ndarray)\n', false);
 // cluster's tests pull `array_api_compatible` from scipy.conftest (a numpy-only
 // parametrize here), same stub the fft blob uses.
 add('scipy.conftest',

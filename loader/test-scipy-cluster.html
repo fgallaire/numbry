@@ -332,6 +332,7 @@ const RAND_C = {
 };
 // scipy.special's nine extensions + numpy.fft + numpy.linalg + _ccallback_c.
 const ND_C = {
+  'numpy.linalg._umath_linalg':                '_PyInit__umath_linalg',
   'scipy._lib._ccallback_c':                  '_PyInit__ccallback_c',
   'scipy.cluster._vq':                        '_PyInit__vq',
   'scipy.cluster._hierarchy':                 '_PyInit__hierarchy',

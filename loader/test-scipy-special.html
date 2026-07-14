@@ -84,6 +84,11 @@ def _fixture_cases(func, mod, cases):
     for name in names:
         if all(name in c for c in cases):
             continue
+        if name == "xp":
+            import numpy as _xpnp
+            for c in cases:
+                c.setdefault("xp", _xpnp)
+            continue
         if name == "request":
             for c in cases:
                 c.setdefault("request", _Request(mod))

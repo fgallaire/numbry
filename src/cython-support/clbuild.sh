@@ -70,7 +70,7 @@ if [ -n "$FAILED" ]; then echo "compile failures — not linking"; exit 1; fi
 
 # ---- link -> build/npcl.{mjs,wasm}
 NR="$ROOT/build/nprnd-obj"
-EXP='"_PyInit__multiarray_umath","_wasthon_init","_wasthon_module_create","_malloc","_free","_PyInit__common","_PyInit_bit_generator","_PyInit__mt19937","_PyInit__philox","_PyInit__pcg64","_PyInit__sfc64","_PyInit__bounded_integers","_PyInit__generator","_PyInit_mtrand","_PyInit__vq","_PyInit__hierarchy","_PyInit__optimal_leaf_ordering","_PyInit__ccallback_c"'
+EXP='"_PyInit__multiarray_umath","_PyInit__umath_linalg","_wasthon_init","_wasthon_module_create","_malloc","_free","_PyInit__common","_PyInit_bit_generator","_PyInit__mt19937","_PyInit__philox","_PyInit__pcg64","_PyInit__sfc64","_PyInit__bounded_integers","_PyInit__generator","_PyInit_mtrand","_PyInit__vq","_PyInit__hierarchy","_PyInit__optimal_leaf_ordering","_PyInit__ccallback_c"'
 CY="$NR/_common.o $NR/bit_generator.o $NR/_mt19937.o $NR/_philox.o $NR/_pcg64.o $NR/_sfc64.o $NR/_bounded_integers.o $NR/_generator.o $NR/mtrand.o"
 ALGO="$NR/mt19937.o $NR/mt19937-jump.o $NR/philox.o $NR/pcg64.o $NR/sfc64.o $NR/legacy-distributions.o"
 emcc -O1 "$ROOT"/numpy-probe/obj/*.o "$ROOT/build/linalg-obj"/*.o "$ROOT/build/wasthon.o" "$NR/tanh_stub.o" $CY $ALGO "$NR"/npyrandom/*.o "$OUT"/*.o \
