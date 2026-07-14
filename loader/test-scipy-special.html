@@ -177,6 +177,125 @@ def run_module(mod):
                 _run_one(getattr(inst, mname), name + "." + mname, out, mod,
                          _expand_params(getattr(cls, "_pytest_params", None)))
     return out
+
+# ---- per-case worklist (async driver) ----------------------------------
+# Same collection logic as run_module/_run_one, but instead of executing,
+# build a flat list of (label, marker, thunk) items the JS driver runs ONE
+# PER JOB with an event-loop yield in between. Job boundaries let the GC
+# collect each case's discarded wrappers so the bridge FinalizationRegistry
+# reclaims their C structs (rt.reclaimResults) — the handle table stays
+# flat instead of growing one leaked entry per ufunc call.
+import builtins as _bi
+
+def _case_thunk(func, kwargs):
+    def thunk():
+        func(**kwargs)
+    return thunk
+
+def _method_thunk(cls, mname, kwargs):
+    # Instantiate + setup at RUN time (like run_module does), not at
+    # collection time, so per-test construction order is preserved.
+    def thunk():
+        inst = cls()
+        for setup in ("setup_method", "setup"):
+            su = getattr(inst, setup, None)
+            if su:
+                try: su()
+                except TypeError:
+                    try: su(getattr(inst, mname))
+                    except Exception: pass
+                except Exception: pass
+                break
+        getattr(inst, mname)(**kwargs)
+    return thunk
+
+def _collect_cases(func, label, items, mod=None, base=None, cls=None, mname=None):
+    if getattr(func, "_pytest_skip", False):
+        items.append((label, "skip", None)); return
+    try:
+        cases = _expand(func)
+        if base:
+            merged = []
+            for b in base:
+                for c in cases:
+                    d = dict(b); d.update(c); merged.append(d)
+            cases = merged
+        cases = _fixture_cases(func, mod, cases)
+    except Exception:
+        cases = [{}]
+    xf = "xfail" if getattr(func, "_pytest_xfail", False) else None
+    for kwargs in cases:
+        lbl = label
+        _pv = kwargs.get("param")
+        if _pv is not None:
+            # pytest-style case id, so reports (and budget skips) can name
+            # the exact parametrized case.
+            try:
+                lbl = label + "[" + _pv[0].__name__ + "]"
+            except Exception:
+                pass
+        if cls is not None:
+            items.append((lbl, xf, _method_thunk(cls, mname, kwargs)))
+        else:
+            items.append((lbl, xf, _case_thunk(func, kwargs)))
+
+def build_worklist(mod):
+    items = []
+    names = dir(mod)
+    for name in names:
+        if not name.startswith("test_"):
+            continue
+        obj = getattr(mod, name, None)
+        if callable(obj) and not isinstance(obj, type):
+            _collect_cases(obj, name, items, mod)
+    for name in names:
+        cls = getattr(mod, name, None)
+        if isinstance(cls, type) and name.startswith("Test"):
+            if getattr(cls, "_pytest_skip", False):
+                continue
+            sc_exc = None
+            sc = getattr(cls, "setup_class", None)
+            if sc:
+                try: sc()
+                except _pt.Skipped: sc_exc = "skip"
+                except BaseException as e:
+                    sc_exc = "setup_class " + type(e).__name__ + ": " + str(e)[:60]
+            for mname in dir(cls):
+                if not mname.startswith("test_"):
+                    continue
+                m = getattr(cls, mname, None)
+                if not callable(m):
+                    continue
+                label = name + "." + mname
+                if sc_exc == "skip":
+                    items.append((label, "skip", None)); continue
+                if sc_exc:
+                    items.append((label, "fail:" + sc_exc, None)); continue
+                _collect_cases(m, label, items, mod,
+                               _expand_params(getattr(cls, "_pytest_params", None)),
+                               cls, mname)
+    return items
+
+def _ws_run(i):
+    label, marker, thunk = _bi._ws_items[i]
+    out = _bi._ws_out
+    if marker == "skip":
+        out[2] += 1; return
+    if marker is not None and marker.startswith("fail:"):
+        out[1] += 1; out[3].append(label + ": " + marker[5:]); return
+    try:
+        thunk()
+        out[0] += 1
+    except _pt.Skipped:
+        out[2] += 1
+    except _pt.XFailed:
+        out[2] += 1
+    except BaseException as e:
+        if marker == "xfail":
+            out[2] += 1; return
+        out[1] += 1
+        out[3].append(label + ": " + type(e).__name__ + ": " + str(e)[:80])
+_bi._ws_run = _ws_run
 </script>
 
 <script type="module">
@@ -306,28 +425,84 @@ try {
   };
 
   const runnerSrc = document.getElementById('runner').textContent;
-  const driver = runnerSrc + `
+  // Three-phase async driver. Collection and each test CASE run in their
+  // own JS job with an event-loop yield in between: at every boundary the
+  // GC can collect the previous case's discarded result wrappers, and the
+  // bridge FinalizationRegistry (rt.reclaimResults) frees their C structs.
+  // A single synchronous run_module() run leaked one handle per ufunc call,
+  // so per-call cost grew with the live-set and the 285k-call
+  // test_cython_special timed out; per-case jobs keep the table flat (and
+  // stop Firefox's slow-script watchdog from seeing one giant sync job).
+  const collectSrc = runnerSrc + `
 
+from browser import window as _win
+import builtins as _bi
 try:
     _mod = __import__(${JSON.stringify(TEST)}, fromlist=["_"])
 except BaseException as _e:
     print("IMPORT FAILED: " + type(_e).__name__ + ": " + str(_e)[:150])
+    _win.__ws_n = -1
 else:
-    _p, _f, _s, _fails = run_module(_mod)
-    print("ran=" + str(_p + _f + _s))
-    print("passed=" + str(_p))
-    print("failed+errored=" + str(_f))
-    print("skipped=" + str(_s))
-    for _m in _fails[:12]:
-        print("  FAIL " + _m)
+    _bi._ws_items = build_worklist(_mod)
+    _bi._ws_out = [0, 0, 0, []]
+    _win.__ws_n = len(_bi._ws_items)
+`;
+
+  const summarySrc = `
+import builtins as _bi
+_p, _f, _s, _fails = _bi._ws_out
+print("ran=" + str(_p + _f + _s))
+print("passed=" + str(_p))
+print("failed+errored=" + str(_f))
+print("skipped=" + str(_s))
+for _m in _fails[:12]:
+    print("  FAIL " + _m)
 print("=== done ===")
 `;
+
+  // Unclamped macrotask yield (nested setTimeout clamps to 4 ms).
+  const mc = new MessageChannel();
+  let resolveTick = null;
+  mc.port1.onmessage = () => { const r = resolveTick; resolveTick = null; if (r) r(); };
+  const tick = () => new Promise(r => { resolveTick = r; mc.port2.postMessage(0); });
+
+  // Self-identify so a stale-cache page is immediately visible.
+  log('runner: async per-case v2 | bridge reclaim: ' +
+      (M.wasthon.demoted instanceof Map ? 'present' : 'MISSING (stale npsp.mjs?)'));
 
   const origConsole = console.log;
   console.log = (...a) => { logEl.textContent += a.map(x => typeof x === 'string' ? x : String(x)).join(' '); };
   const t0 = performance.now();
-  try { $B.runPythonSource(driver, 'scipy_special_test_' + TEST.replace(/\./g, '_')); }
-  finally { console.log = origConsole; }
+  try {
+    globalThis.__ws_n = 0;
+    $B.runPythonSource(collectSrc, 'scipy_special_collect');
+    const N = globalThis.__ws_n;
+    if (N >= 0) {
+      log('cases: ' + N);
+      // Imports and collection settled: reclaim per-call results from here.
+      M.wasthon.reclaimResults = true;
+      for (let i = 0; i < N; i++) {
+        try {
+          $B.runPythonSource('import builtins\nbuiltins._ws_run(' + i + ')', 'ws_case');
+        } catch (e) {
+          try {
+            $B.runPythonSource('import builtins\nbuiltins._ws_out[1] += 1\n' +
+              'builtins._ws_out[3].append(builtins._ws_items[' + i +
+              '][0] + ": driver-level crash")', 'ws_case_err');
+          } catch (e2) {}
+        }
+        if ((i + 1) % 20 === 0) {
+          log('  … ' + (i + 1) + '/' + N + ' (' +
+              ((performance.now() - t0) / 1000).toFixed(0) + 's, handles=' +
+              M.wasthon.handles.size + ')');
+        }
+        await tick();
+      }
+      $B.runPythonSource(summarySrc, 'scipy_special_summary');
+    } else {
+      console.log('=== done ===\n');
+    }
+  } finally { console.log = origConsole; }
   log('(' + (performance.now() - t0).toFixed(0) + ' ms)');
 } catch(e) {
   log('IMPORT FAILED: ' + (e && (e.args ? String(e.args[0]) : (e.stack || e.message || e))));

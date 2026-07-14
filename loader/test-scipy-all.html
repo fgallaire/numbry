@@ -78,7 +78,11 @@ for (const g of GROUPS) {
   for (const m of g.mods) ROWS.push({ mod: m, page: g.page });
 }
 
-const TIMEOUT_MS = 420_000;
+// 15 min: scipy.special's test_cython_special runs ~183 s (its
+// test_cython_api[elliprj] case alone is a 16^4 = 65792-point cartesian
+// product in ONE synchronous case). A tighter ceiling risks flipping the
+// whole module to "timeout" on a slow machine and losing every pass in it.
+const TIMEOUT_MS = 900_000;
 const POLL_MS = 300;
 
 function shortName(m) { return m.split('.').slice(-1)[0]; }
