@@ -197,31 +197,15 @@ n = 0; bytes = 0;
 walk(path.join(SC, 'scipy', 'special'), 'scipy.special');
 walk(path.join(SC, 'scipy', 'special', 'tests'), 'scipy.special.tests');
 
-// The ONE real scipy.linalg consumer in special's Python layer is
-// _orthogonal.py's `linalg.eigvals_banded(c, overwrite_a_band=True)` (the
-// Golub-Welsch quadrature nodes; every other `from scipy import …` hit is a
-// docstring). scipy.linalg itself is behind the Fortran wall, so serve that
-// single function on numpy: densify the symmetric band, np.linalg.eigvalsh
-// (same ascending order as LAPACK).
+// scipy.linalg is behind the Fortran wall (real .f compiled by gfortran, which
+// this wasm toolchain has no frontend for). But the functions scipy.special /
+// signal / spatial / cluster actually pull from it are all numpy.linalg-backed
+// (numpy's f2c'd lapack_lite works here) or pure-numpy — so serve that subset
+// as a façade. See src/cython-support/scipy_linalg_facade.py for the scope and
+// what is deliberately absent (schur/qz/pivoted-LU/cython_blas → AttributeError,
+// never a wrong answer).
 add('scipy.linalg',
-  'import numpy as _np\n' +
-  'def eigvals_banded(a_band, lower=False, overwrite_a_band=False,\n' +
-  '                   select="a", select_range=None, max_ev=0, check_finite=True):\n' +
-  '    ab = _np.asarray(a_band, dtype=float)\n' +
-  '    u = ab.shape[0] - 1\n' +
-  '    n = ab.shape[1]\n' +
-  '    A = _np.zeros((n, n))\n' +
-  '    for k in range(u + 1):\n' +
-  '        if lower:\n' +
-  '            for j in range(n - k):\n' +
-  '                A[j + k, j] = ab[k, j]\n' +
-  '                A[j, j + k] = ab[k, j]\n' +
-  '        else:\n' +
-  '            off = u - k\n' +
-  '            for j in range(off, n):\n' +
-  '                A[j - off, j] = ab[k, j]\n' +
-  '                A[j, j - off] = ab[k, j]\n' +
-  '    return _np.linalg.eigvalsh(A)\n', true);
+  fs.readFileSync(path.join(HERE, 'scipy_linalg_facade.py'), 'utf8'), true);
 
 // logsumexp / softmax / log_softmax go through scipy._lib._util._asarray_validated,
 // which (sparse_ok=False by default) does `import scipy.sparse; scipy.sparse.issparse(a)`
