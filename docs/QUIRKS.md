@@ -5,31 +5,30 @@ doesn't re-chase them. Newest first.
 
 ---
 
-## `scipy.special` `test_errstate_cpp_scipy_special`: passes on CI, fails on a local build (7/3 vs 6/4)
+## RESOLVED — `scipy.special` `test_sf_error` errstate tests (was 6/4 local, 7/3 CI)
 
-**Symptom.** The **deployed** dashboard (GitHub Pages, built by CI) shows
-`scipy.special.tests.test_sf_error` at **7/3** — `test_errstate_cpp_scipy_special`
-*passes*. A **locally**-built `npsp.mjs` shows **6/4** — that one test fails with
-`AssertionError: DID NOT RAISE (SpecialFunctionError)`. The other three errstate
-tests (`test_errstate_all_but_one`, `test_errstate_c_basic`,
-`test_sf_error_special_refcount`) fail in **both** builds.
+**History.** `test_sf_error` used to fail its four `errstate` tests
+(`test_errstate_c_basic`, `test_errstate_all_but_one`,
+`test_sf_error_special_refcount`, and — locally only — `test_errstate_cpp_scipy_special`),
+with a puzzling local↔CI split (6/4 vs 7/3). An earlier version of this file
+guessed the split was "C++ exception propagation sensitive to the toolchain."
+That guess was wrong.
 
-**What it is.** `test_errstate_cpp_scipy_special` checks that a **C++** special
-ufunc raises `SpecialFunctionError` when called under `sc.errstate(all='raise')`.
-Whether the C++ exception → `PyErr` propagation actually fires is sensitive to the
-exact toolchain build (emscripten's C++ exception handling / optimization). The
-**clean, from-scratch CI build** (fresh emsdk 5.0.7, all objects compiled
-together) makes it raise; some local build states do not.
+**Real root cause.** scipy 1.14's xsf `special/error.h` compiles
+`special::set_error()` as an **inline no-op** unless `-DSP_SPECFUN_ERROR` is
+defined; the real implementation (which looks up the errstate action and
+raises) lives once in `sf_error.cc`. The recipe only passed the flag to three
+TUs (`sf_error`, `_special_ufuncs`, `_gufuncs`), so a domain error inside a
+kernel compiled **without** it — e.g. `cephes_spence` in
+`special_wrappers.cpp` — was silently swallowed: `sc.spence(-1)` returned NaN
+and `sc.errstate(domain='raise')` never raised.
 
-**What it is NOT — a code regression.** Ruled out exhaustively: `npsp` relinked
-against every recent bridge — `58de01b` (matplotlib base) → `2ee1f88` →
-`7f58e4d` → `56fcfc9` (current `main`) — **all give 6/4 locally**, so no bridge
-commit flipped it; the pre-`y*` bridge is 6/4 too; and an A/B with vs. without the
-`scipy.sparse.issparse` stub is byte-identical on `sf_error`. The original
-`scipy.special` port already measured **6/4 locally** while its CI deployed
-**7/3** — the gap predates everything.
+**Fix.** `-DSP_SPECFUN_ERROR` in the base `CFLAGS`/`CXXFLAGS` (spbuild.sh), so
+every TU gets it — matching meson, where `sf_error_state_dep` carries the flag
+to all special targets. Now **10/0 deterministically**, local and CI. Safe:
+under the default errstate (everything `ignore`) `set_error` returns at the
+IGNORE check, so nothing changes except that errstate now works.
 
-**Takeaway.** For this test the **CI / deployed dashboard is the source of
-truth**. A local `npsp` that disagrees with the deployed by *exactly*
-`test_errstate_cpp_scipy_special` is this quirk, not a regression — don't chase
-it. The next CI rebuild deploys 7/3 unchanged.
+**Lesson.** A local↔CI split on a *numeric*/raise test can be a missing
+compile-time `-D`, not inherent "toolchain sensitivity" — chase the flag
+before theorising about the toolchain.

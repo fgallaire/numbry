@@ -50,7 +50,15 @@ SPINC="-I $OUT/inc -I $SRC -I $CS -I $OUT/work/scipy/special -I $ROOT/numpy-prob
 # populates it. Same shape as mplbuild.sh's PY_ARRAY_UNIQUE_SYMBOL.
 APISYM="-DPY_ARRAY_UNIQUE_SYMBOL=_scipy_special_ARRAY_API -DPY_UFUNC_UNIQUE_SYMBOL=_scipy_special_UFUNC_API"
 SPINC="$SPINC $APISYM"
-CFLAGS="-O1 -c -DNDEBUG -DPy_PYTHON_H -DNPY_NO_DEPRECATED_API=0 -DCYTHON_VECTORCALL_TPNEW=0 $PP -Wno-macro-redefined -Wno-int-conversion -Wno-incompatible-pointer-types -include $SRC/patchlevel.h -include $CS/cython_compat.h -include $CS/scipy_compat.h -include $CS/sp_compat.h $SPINC"
+# -DSP_SPECFUN_ERROR (was only on 3 TUs): xsf/cephes error.h makes
+# special::set_error() an inline NO-OP unless this is defined — so a domain
+# error in a kernel compiled without it (e.g. cephes_spence in
+# special_wrappers.cpp) was swallowed and sc.errstate(...='raise') never
+# raised (test_sf_error). The real special::set_error lives once in
+# sf_error.cc (also flagged); every other TU with the flag gets the extern
+# decl and links to it. Harmless under the default errstate (set_error returns
+# at the IGNORE check), and in C TUs the __cplusplus guard skips the block.
+CFLAGS="-O1 -c -DSP_SPECFUN_ERROR -DNDEBUG -DPy_PYTHON_H -DNPY_NO_DEPRECATED_API=0 -DCYTHON_VECTORCALL_TPNEW=0 $PP -Wno-macro-redefined -Wno-int-conversion -Wno-incompatible-pointer-types -include $SRC/patchlevel.h -include $CS/cython_compat.h -include $CS/scipy_compat.h -include $CS/sp_compat.h $SPINC"
 # scipy_compat.h is extern "C"-guarded, so give the C++ TUs the same
 # recipe-level shims the C TUs get (Py_tp_base, GenericSetDict, PyUnicode_Equal…);
 # sp_compat.h then only carries the handful missing from BOTH.
@@ -58,7 +66,7 @@ CFLAGS="-O1 -c -DNDEBUG -DPy_PYTHON_H -DNPY_NO_DEPRECATED_API=0 -DCYTHON_VECTORC
 # overflow and catch in-function (boost_special_functions.h erfinv_wrap);
 # emscripten's default turns any throw into abort() before the catch —
 # cython_special erfinv(±10) killed the wasm runtime mid-suite.
-CXXFLAGS="-O1 -c -std=c++17 -fwasm-exceptions -DNDEBUG -DPy_PYTHON_H -DNPY_NO_DEPRECATED_API=0 -DCYTHON_VECTORCALL_TPNEW=0 $PP -Wno-macro-redefined -include $SRC/patchlevel.h -include $CS/cython_compat.h -include $CS/scipy_compat.h -include $CS/sp_compat.h $SPINC"
+CXXFLAGS="-O1 -c -std=c++17 -fwasm-exceptions -DSP_SPECFUN_ERROR -DNDEBUG -DPy_PYTHON_H -DNPY_NO_DEPRECATED_API=0 -DCYTHON_VECTORCALL_TPNEW=0 $PP -Wno-macro-redefined -include $SRC/patchlevel.h -include $CS/cython_compat.h -include $CS/scipy_compat.h -include $CS/sp_compat.h $SPINC"
 
 mkdir -p "$OUT/inc"
 cat > "$OUT/inc/lapack_defs.h" <<'EOF'
