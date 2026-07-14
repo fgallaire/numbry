@@ -51,6 +51,52 @@ n++;
 scripts['pytest'] = ['.py', fs.readFileSync(PYTEST_SHIM, 'utf8'), [], false];
 n++;
 
+// Brython perf: scalar fast path for assert_allclose. The stock path (full
+// np.isclose + errstate + suppress_warnings machinery) costs ~3 ms per call
+// under Brython; scipy.special's multi-complex-arg cython_special cases do a
+// cartesian product of test points (elliprj: 16^4 = 65536 scalar asserts in
+// ONE test case), blowing the browser's slow-script budget. Decide ONLY the
+// clean scalar pass here with numpy's own formula; every other outcome
+// (arrays, failures, nan/inf edges, exotic kwargs) falls through to the
+// original, so failure messages and semantics stay bit-identical.
+{
+  const key = 'numpy.testing._private.utils';
+  if (!scripts[key]) throw new Error('numpy.testing._private.utils not walked');
+  scripts[key][1] += `
+
+# --- wasthon: Brython fast path for scalar assert_allclose (see gen_numpy_vfs)
+_wasthon_assert_allclose = assert_allclose
+
+def _wasthon_cnan(z):
+    return (z.real != z.real) or (z.imag != z.imag)
+
+def assert_allclose(actual, desired, rtol=1e-7, atol=0, equal_nan=True,
+                    err_msg='', verbose=True, **kw):
+    if not kw and getattr(actual, 'shape', ()) == () \\
+            and getattr(desired, 'shape', ()) == ():
+        try:
+            # NOT complex(x): the bridge's complex() on a np.complex128
+            # falls back to __float__ and silently DROPS the imaginary part
+            # (bridge bug, tracked separately). The .real/.imag getsets are
+            # exact — and exist on every numeric type, builtin or numpy.
+            a = complex(float(actual.real), float(actual.imag))
+            d = complex(float(desired.real), float(desired.imag))
+            if a == d or abs(a - d) <= atol + rtol * abs(d):
+                return
+            # numpy's isclose treats a nan-vs-nan pair as equal under
+            # equal_nan (complex: nan in EITHER component) — the dominant
+            # outcome on invalid-argument test points, so it must stay on
+            # the fast path too.
+            if equal_nan and _wasthon_cnan(a) and _wasthon_cnan(d):
+                return
+        except Exception:
+            pass
+    _wasthon_assert_allclose(actual, desired, rtol=rtol, atol=atol,
+                             equal_nan=equal_nan, err_msg=err_msg,
+                             verbose=verbose, **kw)
+`;
+}
+
 // Some dirs are namespace packages with no __init__.py (e.g. numpy/_core/tests),
 // so no package entry was emitted for them and Brython's VFSFinder can't resolve
 // `import numpy._core.tests.test_x`. Synthesize an empty package for every parent
