@@ -69,6 +69,12 @@ const GROUPS = [
   { name: 'scipy.fft', page: 'test-scipy-fft.html', mods: [
     'scipy.fft.tests.test_helper',
   ] },
+  // scipy.cluster: the three Cython extensions build and compute (vq/linkage/
+  // fcluster); the suites are still WIP (Brython test-execution quirks), so
+  // these rows read red/amber until those are closed.
+  { name: 'scipy.cluster', page: 'test-scipy-cluster.html', mods: [
+    'test_vq', 'test_hierarchy', 'test_disjoint_set',
+  ].map(m => 'scipy.cluster.tests.' + m) },
 ];
 
 // Flat list of {mod, page, group?} rows (group rows are section headers).

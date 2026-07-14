@@ -24,6 +24,7 @@ if (!SC) { console.error('usage: gen_scipy_vfs.mjs <scipy-1.14.1-src>'); process
 const OUT = path.join(ROOT, 'build', 'scipy_ndimage_vfs.js');
 const OUT_SPECIAL = path.join(ROOT, 'build', 'scipy_special_vfs.js');
 const OUT_FFT = path.join(ROOT, 'build', 'scipy_fft_vfs.js');
+const OUT_CLUSTER = path.join(ROOT, 'build', 'scipy_cluster_vfs.js');
 
 let scripts = { $timestamp: Date.now() };
 let n = 0, bytes = 0;
@@ -235,3 +236,29 @@ add('scipy.conftest',
 const blob3 = ';(function(){\nif(typeof __BRYTHON__==="undefined"){throw new Error("load brython.js first")}\n__BRYTHON__.update_VFS(' + JSON.stringify(scripts) + ');\n})();\n';
 fs.writeFileSync(OUT_FFT, blob3);
 console.log('scipy.fft VFS: ' + n + ' modules, ' + (bytes / 1048576).toFixed(1) + ' MB src, blob ' + (blob3.length / 1048576).toFixed(1) + ' MB -> ' + OUT_FFT);
+
+// ---------------------------------------------------------------------------
+// Fourth blob: the scipy.cluster Python layer + its suite (pairs with
+// build/npcl.mjs from clbuild.sh). scipy.cluster is Fortran-free; its only
+// scipy dependency is scipy.spatial.distance (pdist/cdist/squareform), whose
+// fast path is a pybind11 C++ extension — served here as a numpy façade
+// instead. scipy.linalg comes along via the same façade as elsewhere.
+scripts = { $timestamp: Date.now() };
+n = 0; bytes = 0;
+walk(path.join(SC, 'scipy', 'cluster'), 'scipy.cluster');
+walk(path.join(SC, 'scipy', 'cluster', 'tests'), 'scipy.cluster.tests');
+add('scipy.linalg',
+  fs.readFileSync(path.join(HERE, 'scipy_linalg_facade.py'), 'utf8'), true);
+// scipy.spatial's real __init__ pulls qhull/ckdtree (C++); cluster only needs
+// the distance submodule, so serve a minimal package + the distance façade.
+add('scipy.spatial', 'from . import distance\n', true);
+add('scipy.spatial.distance',
+  fs.readFileSync(path.join(HERE, 'scipy_spatial_distance_facade.py'), 'utf8'), false);
+// cluster's tests pull `array_api_compatible` from scipy.conftest (a numpy-only
+// parametrize here), same stub the fft blob uses.
+add('scipy.conftest',
+  'import pytest\nimport numpy as _np\n' +
+  'array_api_compatible = pytest.mark.parametrize("xp", [_np])\n', false);
+const blobCl = ';(function(){\nif(typeof __BRYTHON__==="undefined"){throw new Error("load brython.js first")}\n__BRYTHON__.update_VFS(' + JSON.stringify(scripts) + ');\n})();\n';
+fs.writeFileSync(OUT_CLUSTER, blobCl);
+console.log('scipy.cluster VFS: ' + n + ' modules, ' + (bytes / 1048576).toFixed(1) + ' MB src, blob ' + (blobCl.length / 1048576).toFixed(1) + ' MB -> ' + OUT_CLUSTER);

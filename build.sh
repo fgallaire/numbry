@@ -124,6 +124,8 @@ echo "=== scipy.fft (pypocketfft pybind11) -> build/npfft.mjs ==="
 # the ndimage phase already built, so it must run after ndbuild.
 git -C "$SC" submodule update --init --depth 1 scipy/_lib/pocketfft
 PYBIND11_INC="$PYTOOLS/pybind11/include" bash "$W/cython-support/fftbuild.sh" "$SC" "$NP"
+echo "=== scipy.cluster (3 Cython extensions, Fortran-free) -> build/npcl.mjs ==="
+CYTHON_PYTHONPATH="$CY" bash "$W/cython-support/clbuild.sh" "$SC" "$NP"
 
 echo "=== Pillow C core (PNG via zlib) -> build/nppil.mjs ==="
 # Pure C, hand-written C-API (no Cython/pybind11/Fortran). Standalone bundle:
@@ -162,11 +164,12 @@ node "$W/cython-support/gen_scipy_vfs.mjs" "$SC"
 
 echo "=== collect artifacts ==="
 mkdir -p "$HERE/build"
-for f in numpy_multiarray_umath nprnd npnd npsp npfft nppd npmpl npsb nppil; do
+for f in numpy_multiarray_umath nprnd npnd npsp npfft npcl nppd npmpl npsb nppil; do
   cp "$W/build/$f.mjs" "$W/build/$f.wasm" "$HERE/build/"
 done
 cp "$W"/build/numpy_vfs.js "$W"/build/pandas_vfs.js "$W"/build/scipy_ndimage_vfs.js \
-   "$W"/build/scipy_special_vfs.js "$W"/build/scipy_fft_vfs.js "$W"/build/pil_vfs.js \
+   "$W"/build/scipy_special_vfs.js "$W"/build/scipy_fft_vfs.js "$W"/build/scipy_cluster_vfs.js \
+   "$W"/build/pil_vfs.js \
    "$W"/build/dateutil_zoneinfo_data.js "$W"/build/mpl_vfs.js "$W"/build/sb_vfs.js "$HERE/build/"
 rm -rf "$HERE/loader/brython"
 cp -r "$W/loader/brython" "$HERE/loader/brython"

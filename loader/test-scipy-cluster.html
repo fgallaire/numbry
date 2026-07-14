@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Wasthon — scipy.cluster test module</title>
+<script src="./brython/brython.js"></script>
+<script src="./brython/brython_stdlib.js"></script>
+<!-- numpy's Python layer + LAPACK stub + the pytest shim, as a Brython VFS -->
+<script src="../build/numpy_vfs.js"></script>
+<!-- scipy bootstrap + scipy._lib (shared with the ndimage page) -->
+<script src="../build/scipy_ndimage_vfs.js"></script>
+<!-- the REAL scipy.special Python layer + its suite; loaded last so its
+     'scipy.special' entry replaces the ndimage page's sindg/cosdg stub -->
+<script src="../build/scipy_cluster_vfs.js"></script>
+</head>
+<body>
+<p style="font-size:0.85em;margin:0 0 1em 0;"><a href="index.html">← back to index</a></p>
+<h1>Wasthon — scipy.cluster test module</h1>
+<p style="color:#666;font-size:0.9em;max-width:70ch;">
+  Runs a single <b>SciPy 1.14.1</b> <code>scipy/special/tests/test_*.py</code>
+  module against wasthon — the nine Fortran-free <code>scipy.special</code>
+  extensions (cephes/xsf/Boost.Math, codegen'd ufuncs) compiled to wasm, with
+  the one LAPACK routine special needs (<code>dstevr</code>) emulated on
+  numpy's <code>lapack_lite</code>. Pass
+  <code>?test=scipy.special.tests.test_basic</code> to pick a module. The
+  dashboard (<a href="test-scipy-special-all.html">test-scipy-special-all</a>)
+  drives this page one module at a time.
+</p>
+<pre id="log" style="background:#f4f4f4;padding:1em;font-size:13px;line-height:1.4;"></pre>
+
+<!-- the collector/runner: identical to test-scipy.html's. -->
+<script type="text/x-scipy-runner" id="runner">
+import pytest as _pt
+
+def _expand_params(params):
+    if not params:
+        return [{}]
+    result = [{}]
+    for argnames, argvalues in reversed(params):
+        names = [n.strip() for n in (argnames.split(",") if isinstance(argnames, str) else argnames)]
+        factor = []
+        for v in argvalues:
+            val = v.values if type(v).__name__ == "_Param" else v
+            if len(names) == 1:
+                factor.append({names[0]: val})
+            else:
+                seq = val if isinstance(val, (tuple, list)) else (val,)
+                factor.append(dict(zip(names, seq)))
+        new = []
+        for base in result:
+            for f in factor:
+                d = dict(base); d.update(f); new.append(d)
+        result = new
+    return result
+
+def _expand(func):
+    return _expand_params(getattr(func, "_pytest_params", None))
+
+class _Request:
+    def __init__(self, mod, param=None):
+        self._mod = mod
+        self.param = param
+    def getfixturevalue(self, name):
+        return _call_fixture(self._mod, name, None)
+
+def _call_fixture(mod, name, param):
+    fn = getattr(mod, name, None)
+    if fn is None or not callable(fn):
+        raise AttributeError("fixture " + name + " not found in module")
+    args = ()
+    code = getattr(fn, "__code__", None)
+    if code is not None and code.co_argcount and code.co_varnames[0] == "request":
+        args = (_Request(mod, param),)
+    res = fn(*args)
+    if hasattr(res, "__next__"):
+        res = next(res)
+    return res
+
+def _fixture_cases(func, mod, cases):
+    code = getattr(func, "__code__", None)
+    if code is None or mod is None:
+        return cases
+    names = [n for n in code.co_varnames[:code.co_argcount] if n != "self"]
+    for name in names:
+        if all(name in c for c in cases):
+            continue
+        if name == "xp":
+            # array-api namespace fixture: numpy is the only backend here, so
+            # inject it (equivalent to scipy.conftest's @array_api_compatible
+            # parametrize over the available backends).
+            import numpy as _xpnp
+            for c in cases:
+                c.setdefault("xp", _xpnp)
+            continue
+        if name == "request":
+            for c in cases:
+                c.setdefault("request", _Request(mod))
+            continue
+        fn = getattr(mod, name, None)
+        if fn is None or not getattr(fn, "_pytest_fixture", False):
+            continue
+        params = getattr(fn, "_pytest_fixture_params", None)
+        if params:
+            new = []
+            for c in cases:
+                for p in params:
+                    d = dict(c); d[name] = _call_fixture(mod, name, p); new.append(d)
+            cases = new
+        else:
+            for c in cases:
+                c[name] = _call_fixture(mod, name, None)
+    return cases
+
+def _run_one(func, label, out, mod=None, base=None):
+    if getattr(func, "_pytest_skip", False):
+        out[2] += 1; return
+    try:
+        cases = _expand(func)
+        if base:
+            merged = []
+            for b in base:
+                for c in cases:
+                    d = dict(b); d.update(c); merged.append(d)
+            cases = merged
+        cases = _fixture_cases(func, mod, cases)
+    except Exception:
+        cases = [{}]
+    for kwargs in cases:
+        try:
+            func(**kwargs)
+            out[0] += 1
+        except _pt.Skipped:
+            out[2] += 1
+        except _pt.XFailed:
+            out[2] += 1
+        except BaseException as e:
+            if getattr(func, "_pytest_xfail", False):
+                out[2] += 1; continue
+            out[1] += 1
+            out[3].append(label + ": " + type(e).__name__ + ": " + str(e)[:80])
+
+def run_module(mod):
+    out = [0, 0, 0, []]   # passed, failed, skipped, failmsgs
+    names = dir(mod)
+    for name in names:
+        if not name.startswith("test_"):
+            continue
+        obj = getattr(mod, name, None)
+        if callable(obj) and not isinstance(obj, type):
+            _run_one(obj, name, out, mod)
+    for name in names:
+        cls = getattr(mod, name, None)
+        if isinstance(cls, type) and name.startswith("Test"):
+            if getattr(cls, "_pytest_skip", False):
+                continue
+            sc_exc = None
+            sc = getattr(cls, "setup_class", None)
+            if sc:
+                try: sc()
+                except _pt.Skipped: sc_exc = "skip"
+                except BaseException as e:
+                    sc_exc = "setup_class " + type(e).__name__ + ": " + str(e)[:60]
+            for mname in dir(cls):
+                if not mname.startswith("test_"):
+                    continue
+                if not callable(getattr(cls, mname, None)):
+                    continue
+                if sc_exc == "skip":
+                    out[2] += 1; continue
+                if sc_exc:
+                    out[1] += 1; out[3].append(name + "." + mname + ": " + sc_exc); continue
+                try:
+                    inst = cls()
+                except BaseException as e:
+                    out[1] += 1; out[3].append(name + "." + mname + ": ctor " + type(e).__name__); continue
+                for setup in ("setup_method", "setup"):
+                    su = getattr(inst, setup, None)
+                    if su:
+                        try: su()
+                        except TypeError:
+                            try: su(getattr(inst, mname))
+                            except Exception: pass
+                        except Exception: pass
+                        break
+                _run_one(getattr(inst, mname), name + "." + mname, out, mod,
+                         _expand_params(getattr(cls, "_pytest_params", None)))
+    return out
+
+# ---- per-case worklist (async driver) ----------------------------------
+# Same collection logic as run_module/_run_one, but instead of executing,
+# build a flat list of (label, marker, thunk) items the JS driver runs ONE
+# PER JOB with an event-loop yield in between. Job boundaries let the GC
+# collect each case's discarded wrappers so the bridge FinalizationRegistry
+# reclaims their C structs (rt.reclaimResults) — the handle table stays
+# flat instead of growing one leaked entry per ufunc call.
+import builtins as _bi
+
+def _case_thunk(func, kwargs):
+    def thunk():
+        func(**kwargs)
+    return thunk
+
+def _method_thunk(cls, mname, kwargs):
+    # Instantiate + setup at RUN time (like run_module does), not at
+    # collection time, so per-test construction order is preserved.
+    def thunk():
+        inst = cls()
+        for setup in ("setup_method", "setup"):
+            su = getattr(inst, setup, None)
+            if su:
+                try: su()
+                except TypeError:
+                    try: su(getattr(inst, mname))
+                    except Exception: pass
+                except Exception: pass
+                break
+        getattr(inst, mname)(**kwargs)
+    return thunk
+
+def _collect_cases(func, label, items, mod=None, base=None, cls=None, mname=None):
+    if getattr(func, "_pytest_skip", False):
+        items.append((label, "skip", None)); return
+    try:
+        cases = _expand(func)
+        if base:
+            merged = []
+            for b in base:
+                for c in cases:
+                    d = dict(b); d.update(c); merged.append(d)
+            cases = merged
+        cases = _fixture_cases(func, mod, cases)
+    except Exception:
+        cases = [{}]
+    xf = "xfail" if getattr(func, "_pytest_xfail", False) else None
+    for kwargs in cases:
+        lbl = label
+        _pv = kwargs.get("param")
+        if _pv is not None:
+            # pytest-style case id, so reports (and budget skips) can name
+            # the exact parametrized case.
+            try:
+                lbl = label + "[" + _pv[0].__name__ + "]"
+            except Exception:
+                pass
+        if cls is not None:
+            items.append((lbl, xf, _method_thunk(cls, mname, kwargs)))
+        else:
+            items.append((lbl, xf, _case_thunk(func, kwargs)))
+
+def build_worklist(mod):
+    items = []
+    names = dir(mod)
+    for name in names:
+        if not name.startswith("test_"):
+            continue
+        obj = getattr(mod, name, None)
+        if callable(obj) and not isinstance(obj, type):
+            _collect_cases(obj, name, items, mod)
+    for name in names:
+        cls = getattr(mod, name, None)
+        if isinstance(cls, type) and name.startswith("Test"):
+            if getattr(cls, "_pytest_skip", False):
+                continue
+            sc_exc = None
+            sc = getattr(cls, "setup_class", None)
+            if sc:
+                try: sc()
+                except _pt.Skipped: sc_exc = "skip"
+                except BaseException as e:
+                    sc_exc = "setup_class " + type(e).__name__ + ": " + str(e)[:60]
+            for mname in dir(cls):
+                if not mname.startswith("test_"):
+                    continue
+                m = getattr(cls, mname, None)
+                if not callable(m):
+                    continue
+                label = name + "." + mname
+                if sc_exc == "skip":
+                    items.append((label, "skip", None)); continue
+                if sc_exc:
+                    items.append((label, "fail:" + sc_exc, None)); continue
+                _collect_cases(m, label, items, mod,
+                               _expand_params(getattr(cls, "_pytest_params", None)),
+                               cls, mname)
+    return items
+
+def _ws_run(i):
+    label, marker, thunk = _bi._ws_items[i]
+    out = _bi._ws_out
+    if marker == "skip":
+        out[2] += 1; return
+    if marker is not None and marker.startswith("fail:"):
+        out[1] += 1; out[3].append(label + ": " + marker[5:]); return
+    try:
+        thunk()
+        out[0] += 1
+    except _pt.Skipped:
+        out[2] += 1
+    except _pt.XFailed:
+        out[2] += 1
+    except BaseException as e:
+        if marker == "xfail":
+            out[2] += 1; return
+        out[1] += 1
+        out[3].append(label + ": " + type(e).__name__ + ": " + str(e)[:80])
+_bi._ws_run = _ws_run
+</script>
+
+<script type="module">
+const logEl = document.getElementById('log');
+const log = (s) => { logEl.textContent += s + '\n'; };
+
+const params = new URLSearchParams(location.search);
+const TEST = params.get('test') || 'scipy.cluster.tests.test_vq';
+
+const $B = window.__BRYTHON__;
+globalThis.$B = $B;
+globalThis.__BRYTHON__ = $B;
+globalThis._b_ = $B.builtins;
+
+// numpy.random C extensions living in the combined npsp wasm.
+const RAND_C = {
+  'numpy.random._common':            '_PyInit__common',
+  'numpy.random.bit_generator':      '_PyInit_bit_generator',
+  'numpy.random._mt19937':           '_PyInit__mt19937',
+  'numpy.random._philox':            '_PyInit__philox',
+  'numpy.random._pcg64':             '_PyInit__pcg64',
+  'numpy.random._sfc64':             '_PyInit__sfc64',
+  'numpy.random._bounded_integers':  '_PyInit__bounded_integers',
+  'numpy.random._generator':         '_PyInit__generator',
+  'numpy.random.mtrand':             '_PyInit_mtrand',
+};
+// scipy.special's nine extensions + numpy.fft + numpy.linalg + _ccallback_c.
+const ND_C = {
+  'scipy._lib._ccallback_c':                  '_PyInit__ccallback_c',
+  'scipy.cluster._vq':                        '_PyInit__vq',
+  'scipy.cluster._hierarchy':                 '_PyInit__hierarchy',
+  'scipy.cluster._optimal_leaf_ordering':     '_PyInit__optimal_leaf_ordering',
+}
+
+try {
+  log('module: ' + TEST);
+  log('loading combined numpy + numpy.random + scipy.special wasm…');
+  const factory = (await import('../build/npcl.mjs')).default;
+  const M = await factory();
+  M._wasthon_init();
+
+  function makeCMod(name, pyinit) {
+    if ($B.imported[name] !== undefined) return;
+    const def = M[pyinit]();
+    const cmod = M._wasthon_module_create(def);
+    if (cmod !== 0) $B.imported[name] = M.wasthon.handles.get(cmod);
+  }
+
+  function runMA() {
+    const name = 'numpy._core._multiarray_umath';
+    if ($B.imported[name] !== undefined) return;
+    const def = M._PyInit__multiarray_umath();
+    const cmod = M._wasthon_module_create(def);
+    if (cmod !== 0) {
+      $B.imported[name] = M.wasthon.handles.get(cmod);
+      try { $B.str_dict_set($B.get_dict($B.imported['numpy._core']), '_multiarray_umath', $B.imported[name]); } catch(e){}
+    }
+  }
+
+  const orig = $B.$__import__;
+  function runC(fullname, pyinit) {
+    if ($B.imported[fullname] !== undefined) return true;
+    const parts = fullname.split('.');
+    const parent = parts.slice(0, -1).join('.');
+    if (parent && $B.imported[parent] === undefined) {
+      try { orig(parent, {}, {}, [], 0); } catch(e){}
+    }
+    if ($B.imported[fullname] !== undefined) return true;
+    const def = M[pyinit]();
+    if (def === 0) { log('  [C] ' + fullname + ' PyInit returned NULL'); return false; }
+    let mod = null;
+    try { if (!M.wasthon.moduleDefs.get(def)) mod = M.wasthon.handles.get(def); } catch(e){}
+    if (!mod) {
+      try { const di = M.wasthon.moduleDefs.get(def); if (di) di.name = fullname; } catch(e){}
+      const cmod = M._wasthon_module_create(def);
+      if (cmod === 0) { var _pe = M.wasthon.pendingException; log('  [C] ' + fullname + ' init FAILED: ' + (_pe ? _pe.msg : '?')); return false; }
+      mod = M.wasthon.handles.get(cmod);
+    } else {
+      try { $B.str_dict_set($B.get_dict(mod), '__name__', fullname); } catch(e){}
+    }
+    $B.imported[fullname] = mod;
+    if (parent) { try { $B.str_dict_set($B.get_dict($B.imported[parent]), parts[parts.length - 1], mod); } catch(e){} }
+    return true;
+  }
+
+  $B.$__import__ = function(mod_name, globals, locals, fromlist, level) {
+    try {
+      if (level > 0) {
+        if (typeof mod_name === 'string' && mod_name) {
+          const rabs = 'numpy.random.' + mod_name;
+          if (RAND_C[rabs]) { runC(rabs, RAND_C[rabs]); if ($B.imported[rabs]) return $B.imported[rabs]; }
+          for (const k in ND_C) if (k === mod_name || k.endsWith('.' + mod_name)) {
+            runC(k, ND_C[k]); if ($B.imported[k]) return $B.imported[k];
+          }
+        }
+        if (fromlist) for (const f of fromlist) {
+          const fn = typeof f === 'string' ? f : null;
+          if (fn) for (const k in ND_C) if (k.endsWith('.' + fn)) runC(k, ND_C[k]);
+        }
+      }
+      if (typeof mod_name === 'string') {
+        if (mod_name === 'numpy._core._multiarray_umath') runMA();
+        if (RAND_C[mod_name]) runC(mod_name, RAND_C[mod_name]);
+        if (ND_C[mod_name]) runC(mod_name, ND_C[mod_name]);
+        if (fromlist && fromlist.length) for (const f of fromlist) {
+          try {
+            const sub = mod_name + '.' + (typeof f === 'string' ? f : $B.$getattr(f, '__name__', f));
+            if (sub === 'numpy._core._multiarray_umath') runMA();
+            if (RAND_C[sub]) runC(sub, RAND_C[sub]);
+            if (ND_C[sub]) runC(sub, ND_C[sub]);
+            else if (/^(numpy|scipy)\./.test(sub) && $B.VFS && $B.VFS[sub] && $B.imported[sub] === undefined) {
+              orig(sub, {}, {}, [], 0);
+            }
+          } catch(e){}
+        }
+      }
+    } catch(e) { console.warn('import hook:', e); }
+    return orig.apply(this, arguments);
+  };
+
+  const runnerSrc = document.getElementById('runner').textContent;
+  // Three-phase async driver. Collection and each test CASE run in their
+  // own JS job with an event-loop yield in between: at every boundary the
+  // GC can collect the previous case's discarded result wrappers, and the
+  // bridge FinalizationRegistry (rt.reclaimResults) frees their C structs.
+  // A single synchronous run_module() run leaked one handle per ufunc call,
+  // so per-call cost grew with the live-set and the 285k-call
+  // test_cython_special timed out; per-case jobs keep the table flat (and
+  // stop Firefox's slow-script watchdog from seeing one giant sync job).
+  const collectSrc = runnerSrc + `
+
+from browser import window as _win
+import builtins as _bi
+try:
+    _mod = __import__(${JSON.stringify(TEST)}, fromlist=["_"])
+except BaseException as _e:
+    print("IMPORT FAILED: " + type(_e).__name__ + ": " + str(_e)[:150])
+    _win.__ws_n = -1
+else:
+    _bi._ws_items = build_worklist(_mod)
+    _bi._ws_out = [0, 0, 0, []]
+    _win.__ws_n = len(_bi._ws_items)
+`;
+
+  const summarySrc = `
+import builtins as _bi
+_p, _f, _s, _fails = _bi._ws_out
+print("ran=" + str(_p + _f + _s))
+print("passed=" + str(_p))
+print("failed+errored=" + str(_f))
+print("skipped=" + str(_s))
+for _m in _fails[:12]:
+    print("  FAIL " + _m)
+print("=== done ===")
+`;
+
+  // Unclamped macrotask yield (nested setTimeout clamps to 4 ms).
+  const mc = new MessageChannel();
+  let resolveTick = null;
+  mc.port1.onmessage = () => { const r = resolveTick; resolveTick = null; if (r) r(); };
+  const tick = () => new Promise(r => { resolveTick = r; mc.port2.postMessage(0); });
+
+  // Self-identify so a stale-cache page is immediately visible.
+  log('runner: async per-case v2 | bridge reclaim: ' +
+      (M.wasthon.demoted instanceof Map ? 'present' : 'MISSING (stale npcl.mjs?)'));
+
+  const origConsole = console.log;
+  console.log = (...a) => { logEl.textContent += a.map(x => typeof x === 'string' ? x : String(x)).join(' '); };
+  const t0 = performance.now();
+  try {
+    globalThis.__ws_n = 0;
+    $B.runPythonSource(collectSrc, 'scipy_special_collect');
+    const N = globalThis.__ws_n;
+    if (N >= 0) {
+      log('cases: ' + N);
+      // Imports and collection settled: reclaim per-call results from here.
+      M.wasthon.reclaimResults = true;
+      for (let i = 0; i < N; i++) {
+        try {
+          $B.runPythonSource('import builtins\nbuiltins._ws_run(' + i + ')', 'ws_case');
+        } catch (e) {
+          try {
+            $B.runPythonSource('import builtins\nbuiltins._ws_out[1] += 1\n' +
+              'builtins._ws_out[3].append(builtins._ws_items[' + i +
+              '][0] + ": driver-level crash")', 'ws_case_err');
+          } catch (e2) {}
+        }
+        if ((i + 1) % 20 === 0) {
+          log('  … ' + (i + 1) + '/' + N + ' (' +
+              ((performance.now() - t0) / 1000).toFixed(0) + 's, handles=' +
+              M.wasthon.handles.size + ')');
+        }
+        await tick();
+      }
+      $B.runPythonSource(summarySrc, 'scipy_special_summary');
+    } else {
+      console.log('=== done ===\n');
+    }
+  } finally { console.log = origConsole; }
+  log('(' + (performance.now() - t0).toFixed(0) + ' ms)');
+} catch(e) {
+  log('IMPORT FAILED: ' + (e && (e.args ? String(e.args[0]) : (e.stack || e.message || e))));
+  log('=== done ===');
+  console.error(e);
+}
+</script>
+</body>
+</html>
