@@ -78,14 +78,33 @@ def importorskip(name, *a, **k):
 
 
 class _WarnsCtx:
+    # Records warnings raised in the block so tests can inspect them
+    # (`with pytest.warns(...) as w: ...; w[0].message`, `len(w)`). Uses
+    # warnings.catch_warnings(record=True); does NOT swallow exceptions.
     def __init__(self, *a, **k):
-        pass
+        self._log = []
+        self._cm = None
 
     def __enter__(self):
+        import warnings
+        self._cm = warnings.catch_warnings(record=True)
+        self._log = self._cm.__enter__()
+        warnings.simplefilter("always")
         return self
 
-    def __exit__(self, *a):
-        return True
+    def __exit__(self, *exc):
+        if self._cm is not None:
+            self._cm.__exit__(*exc)
+        return False
+
+    def __getitem__(self, i):
+        return self._log[i]
+
+    def __len__(self):
+        return len(self._log)
+
+    def __iter__(self):
+        return iter(self._log)
 
 
 def warns(*a, **k):
