@@ -108,6 +108,11 @@ class _WarnsCtx:
 
 
 def warns(*a, **k):
+    # pytest's legacy callable form warns(WarningCls, func, *args, **kwargs)
+    # calls func and returns its value (numpy's test_floating_overflow does
+    # `flongdouble = pytest.warns(RuntimeWarning, np.longdouble, '1e10000')`).
+    if len(a) >= 2 and callable(a[1]):
+        return a[1](*a[2:], **k)
     return _WarnsCtx()
 
 

@@ -97,14 +97,14 @@ echo "=== relink the two dashboard modules WITH linalg ==="
   emcc -O1 "$OBJ"/*.o "$LA"/*.o "$NR/tanh_stub.o" "$W/build/wasthon.o" \
     --js-library "$SRC/wasthon.js" -Wl,--allow-multiple-definition \
     -s ALLOW_MEMORY_GROWTH=1 -s ALLOW_TABLE_GROWTH=1 \
-    -s EXPORTED_FUNCTIONS='["_PyInit__multiarray_umath","_PyInit__umath_linalg","_wasthon_init","_wasthon_module_create","_malloc","_free","___errno_location","_fetestexcept","_feclearexcept","_feraiseexcept"]' \
+    -s EXPORTED_FUNCTIONS='["_PyInit__multiarray_umath","_PyInit__umath_linalg","_wasthon_init","_wasthon_module_create","_malloc","_free","___errno_location","_fetestexcept","_feclearexcept","_feraiseexcept","_wasthon_set_errno_erange"]' \
     -sFORCE_FILESYSTEM=1 -s EXPORTED_RUNTIME_METHODS='["HEAP32","FS"]' \
     -s MODULARIZE=1 -s EXPORT_ES6=1 -s EXPORT_NAME=numpy_multiarray_umath \
     -o "$W/build/numpy_multiarray_umath.mjs"
   MODS="_common bit_generator _mt19937 _philox _pcg64 _sfc64 _bounded_integers _generator mtrand"
   CYO=""; for M in $MODS; do CYO="$CYO $NR/$M.o"; done
   ALGO="$NR/mt19937.o $NR/mt19937-jump.o $NR/philox.o $NR/pcg64.o $NR/sfc64.o $NR/legacy-distributions.o $NR/legacy_rand_shims.o"
-  EXP='["_PyInit__multiarray_umath","_PyInit__umath_linalg","_PyInit__common","_PyInit_bit_generator","_PyInit__mt19937","_PyInit__philox","_PyInit__pcg64","_PyInit__sfc64","_PyInit__bounded_integers","_PyInit__generator","_PyInit_mtrand","_wasthon_init","_wasthon_module_create","_malloc","_free","___errno_location","_fetestexcept","_feclearexcept","_feraiseexcept"]'
+  EXP='["_PyInit__multiarray_umath","_PyInit__umath_linalg","_PyInit__common","_PyInit_bit_generator","_PyInit__mt19937","_PyInit__philox","_PyInit__pcg64","_PyInit__sfc64","_PyInit__bounded_integers","_PyInit__generator","_PyInit_mtrand","_wasthon_init","_wasthon_module_create","_malloc","_free","___errno_location","_fetestexcept","_feclearexcept","_feraiseexcept","_wasthon_set_errno_erange"]'
   emcc -O1 "$OBJ"/*.o "$LA"/*.o "$NR/tanh_stub.o" $CYO $ALGO "$NR"/npyrandom/*.o "$W/build/wasthon.o" \
     --js-library "$SRC/wasthon.js" --js-library "$CS/cython_support.js" -Wl,--allow-multiple-definition \
     -s ALLOW_MEMORY_GROWTH=1 -s ALLOW_TABLE_GROWTH=1 \
