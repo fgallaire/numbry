@@ -1,0 +1,58 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>np repro</title>
+<pre id="log"></pre>
+<script src="brython/brython.js"></script>
+<script src="brython/brython_stdlib.js"></script>
+<script src="../build/numpy_vfs.js"></script>
+<!-- MEMFS backing shared with the wasm C side: np.fromfile/tofile see what
+     Python open() wrote (numpy longdouble TestFileBased) -->
+<script src="./wasthon-io-write.js"></script>
+<script src="./wasthon-fs.js"></script>
+<script type="module">
+const logEl = document.getElementById('log');
+const log = (s) => { logEl.textContent += s + '\n'; };
+const params = new URLSearchParams(location.search);
+const CODE = params.get('code') || 'import numpy as np\nprint(np.__version__)';
+const $B = window.__BRYTHON__;
+globalThis.$B = $B; globalThis.__BRYTHON__ = $B; globalThis._b_ = $B.builtins;
+try {
+  const factory = (await import('../build/numpy_multiarray_umath.mjs')).default;
+  const M = await factory();
+  M._wasthon_init();
+  if (typeof installWasthonFS === 'function') installWasthonFS(M);
+  globalThis.M = M;
+  const orig = $B.$__import__;
+  $B.$__import__ = function(mod_name){
+    if (mod_name === 'numpy._core._multiarray_umath' && $B.imported[mod_name] === undefined){
+      const def = M._PyInit__multiarray_umath();
+      const cmod = M._wasthon_module_create(def);
+      if (cmod !== 0){ $B.imported[mod_name] = M.wasthon.handles.get(cmod);
+        try { $B.str_dict_set($B.get_dict($B.imported['numpy._core']), '_multiarray_umath', $B.imported[mod_name]); } catch(e){} }
+    }
+    if (mod_name === 'numpy.linalg._umath_linalg' && $B.imported[mod_name] === undefined){
+      const def = M._PyInit__umath_linalg();
+      const cmod = def && M._wasthon_module_create(def);
+      if (cmod){ $B.imported[mod_name] = M.wasthon.handles.get(cmod);
+        try { $B.str_dict_set($B.get_dict($B.imported['numpy.linalg']), '_umath_linalg', $B.imported[mod_name]); } catch(e){} }
+    }
+    return orig.apply(this, arguments);
+  };
+  const origConsole = console.log;
+  console.log = (...a) => { logEl.textContent += a.map(x => typeof x === 'string' ? x : String(x)).join(' ') + '\n'; };
+  const src = `import sys
+try:
+${CODE.split('\n').map(l => '    ' + l).join('\n')}
+    print("=== OK ===")
+except BaseException as _e:
+    print("=== RAISED ===", type(_e).__name__, ":", _e)
+    _tb = _e.__traceback__
+    while _tb is not None:
+        _f = _tb.tb_frame
+        print("  at", _f.f_code.co_filename, "line", _tb.tb_lineno, "in", _f.f_code.co_name)
+        _tb = _tb.tb_next
+`;
+  $B.runPythonSource(src, 'repro');
+  log('=== done ===');
+} catch(e) { log('HARNESS ERROR: ' + e + '\n' + (e.stack||'')); }
+</script>

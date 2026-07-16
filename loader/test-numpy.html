@@ -7,6 +7,10 @@
 <script src="./brython/brython_stdlib.js"></script>
 <!-- numpy's Python layer + LAPACK stub + the pytest shim, as a Brython VFS -->
 <script src="../build/numpy_vfs.js"></script>
+<!-- MEMFS backing shared with the wasm C side: np.fromfile/tofile see what
+     Python open() wrote (numpy longdouble TestFileBased) -->
+<script src="./wasthon-io-write.js"></script>
+<script src="./wasthon-fs.js"></script>
 </head>
 <body>
 <p style="font-size:0.85em;margin:0 0 1em 0;"><a href="index.html">← back to index</a></p>
@@ -222,6 +226,7 @@ try {
   const factory = (await import('../build/numpy_multiarray_umath.mjs')).default;
   const M = await factory();
   M._wasthon_init();
+  if (typeof installWasthonFS === 'function') installWasthonFS(M);
 
   // hook __import__ to create the C extension lazily (as in numpy.html)
   const orig = $B.$__import__;
