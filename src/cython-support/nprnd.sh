@@ -81,7 +81,7 @@ done
 # 32-bit ABI shims (meson instead embeds a private long-ABI distributions.c
 # copy inside the mtrand module — impossible in our single wasm).
 emcc $CFLAGS -DNP_RANDOM_LEGACY -Drandom_poisson=random_poisson_long -Drandom_geometric_search=random_geometric_search_long \
-  "$R/src/legacy/legacy-distributions.c" -o "$OUT/legacy-distributions.o $OUT/legacy_rand_shims.o" 2>"$OUT/legacy-distributions_cc.txt" \
+  "$R/src/legacy/legacy-distributions.c" -o "$OUT/legacy-distributions.o" 2>"$OUT/legacy-distributions_cc.txt" \
   || { echo "legacy-distributions: COMPILE FAIL"; grep "error:" "$OUT/legacy-distributions_cc.txt" | head -4; exit 1; }
 emcc $CFLAGS "$CS/legacy_rand_shims.c" -o "$OUT/legacy_rand_shims.o" 2>"$OUT/legacy_rand_shims_cc.txt" \
   || { echo "legacy_rand_shims: COMPILE FAIL"; grep "error:" "$OUT/legacy_rand_shims_cc.txt" | head -4; exit 1; }
