@@ -58,6 +58,8 @@ class _Request:
     def getfixturevalue(self, name):
         return _call_fixture(self._mod, name, None)
 
+_fixture_finalizers = []
+
 def _call_fixture(mod, name, param):
     # NEVER convert an unresolved fixture into a skip: call any callable of
     # that name (works even when the VFS carries an older pytest shim whose
@@ -72,7 +74,9 @@ def _call_fixture(mod, name, param):
         args = (_Request(mod, param),)
     res = fn(*args)
     if hasattr(res, "__next__"):
-        res = next(res)   # yield fixture: setup value (no teardown)
+        gen = res
+        res = next(gen)   # yield fixture: setup value
+        _fixture_finalizers.append(gen)  # teardown after the test (below)
     return res
 
 def _fixture_cases(func, mod, cases):
@@ -133,6 +137,14 @@ def _run_one(func, label, out, mod=None, base=None):
                 out[2] += 1; continue
             out[1] += 1
             out[3].append(label + ": " + type(e).__name__ + ": " + str(e)[:80])
+    for _g in _fixture_finalizers:
+        try:
+            next(_g)
+        except StopIteration:
+            pass
+        except BaseException:
+            pass
+    del _fixture_finalizers[:]
 
 def run_module(mod):
     out = [0, 0, 0, []]   # passed, failed, skipped, failmsgs
