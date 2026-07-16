@@ -57,18 +57,34 @@ for MOD in $MODS; do
   L=$(grep -n "^  #define CYTHON_COMPILING_IN_CPYTHON 1$" "$C" | head -1 | cut -d: -f1)
   [ -n "$L" ] && sed -i "${L}s/#define CYTHON_COMPILING_IN_CPYTHON 1/#define CYTHON_COMPILING_IN_CPYTHON 0/" "$C" \
     || echo "$MOD: WARN no IN_CPYTHON line"
-  emcc $CFLAGS "$C" -o "$OUT/$MOD.o" 2>"$OUT/${MOD}_cc.txt"
+  # meson compiles the whole mtrand module with -DNP_RANDOM_LEGACY
+  # (RAND_INT_TYPE = long): mtrand.c includes legacy-distributions.h, so
+  # without it the generated code calls legacy_random_multinomial with an
+  # int64 ABI while allocating dtype=np.long (int32 on wasm32) buffers —
+  # every other output slot was 0 and the legacy bit-stream diverged
+  # (test_multinomial, test_integer_repeat sha256, btpe legacy stream).
+  MODDEF=""; [ "$MOD" = "mtrand" ] && MODDEF="-DNP_RANDOM_LEGACY"
+  emcc $CFLAGS $MODDEF "$C" -o "$OUT/$MOD.o" 2>"$OUT/${MOD}_cc.txt"
   NE=$(grep -c "error:" "$OUT/${MOD}_cc.txt" || true)
   echo "$MOD: compile errors=$NE"
   [ "$NE" = "0" ] || { grep "error:" "$OUT/${MOD}_cc.txt" | head -6; exit 1; }
 done
 
 # ---- the bit-generator algorithm C + npyrandom distributions (plain C).
-for f in mt19937/mt19937 mt19937/mt19937-jump philox/philox pcg64/pcg64 sfc64/sfc64 legacy/legacy-distributions; do
+for f in mt19937/mt19937 mt19937/mt19937-jump philox/philox pcg64/pcg64 sfc64/sfc64; do
   b=$(basename "$f")
   emcc $CFLAGS "$R/src/$f.c" -o "$OUT/$b.o" 2>"$OUT/${b}_cc.txt" \
     || { echo "$b: COMPILE FAIL"; grep "error:" "$OUT/${b}_cc.txt" | head -4; exit 1; }
 done
+# legacy-distributions.c: NP_RANDOM_LEGACY like meson's mtrand module, with
+# its two cross-calls into the SHARED (int64) distributions.c routed through
+# 32-bit ABI shims (meson instead embeds a private long-ABI distributions.c
+# copy inside the mtrand module — impossible in our single wasm).
+emcc $CFLAGS -DNP_RANDOM_LEGACY -Drandom_poisson=random_poisson_long -Drandom_geometric_search=random_geometric_search_long \
+  "$R/src/legacy/legacy-distributions.c" -o "$OUT/legacy-distributions.o $OUT/legacy_rand_shims.o" 2>"$OUT/legacy-distributions_cc.txt" \
+  || { echo "legacy-distributions: COMPILE FAIL"; grep "error:" "$OUT/legacy-distributions_cc.txt" | head -4; exit 1; }
+emcc $CFLAGS "$CS/legacy_rand_shims.c" -o "$OUT/legacy_rand_shims.o" 2>"$OUT/legacy_rand_shims_cc.txt" \
+  || { echo "legacy_rand_shims: COMPILE FAIL"; grep "error:" "$OUT/legacy_rand_shims_cc.txt" | head -4; exit 1; }
 mkdir -p "$OUT/npyrandom"
 for f in distributions logfactorial random_hypergeometric random_mvhg_count random_mvhg_marginals; do
   emcc $CFLAGS "$R/src/distributions/$f.c" -o "$OUT/npyrandom/$f.o" 2>"$OUT/npyrandom/${f}_cc.txt" \
@@ -88,7 +104,7 @@ fi
 # ---- link: numpy core + the 9 modules + algo + npyrandom, every PyInit exported.
 EXP='["_PyInit__multiarray_umath","_PyInit__common","_PyInit_bit_generator","_PyInit__mt19937","_PyInit__philox","_PyInit__pcg64","_PyInit__sfc64","_PyInit__bounded_integers","_PyInit__generator","_PyInit_mtrand","_wasthon_init","_wasthon_module_create","_malloc","_free"]'
 CY=""; for MOD in $MODS; do CY="$CY $OUT/$MOD.o"; done
-ALGO="$OUT/mt19937.o $OUT/mt19937-jump.o $OUT/philox.o $OUT/pcg64.o $OUT/sfc64.o $OUT/legacy-distributions.o"
+ALGO="$OUT/mt19937.o $OUT/mt19937-jump.o $OUT/philox.o $OUT/pcg64.o $OUT/sfc64.o $OUT/legacy-distributions.o $OUT/legacy_rand_shims.o"
 emcc -O1 $OBJ/*.o $OUT/tanh_stub.o $CY $ALGO "$OUT"/npyrandom/*.o "$ROOT/build/wasthon.o" \
   --js-library "$SRC/wasthon.js" --js-library "$CS/cython_support.js" \
   -s ALLOW_MEMORY_GROWTH=1 -s ALLOW_TABLE_GROWTH=1 -sSTACK_SIZE=5242880 \

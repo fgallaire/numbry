@@ -20,7 +20,7 @@ LIBS="interval hashtable missing lib tslib algos arrays groupby hashing index in
 EXP='"_PyInit__multiarray_umath","_PyInit__umath_linalg","_PyInit_ft2font","_PyInit__backend_agg","_PyInit__image","_PyInit__path","_PyInit__c_internal_utils","_PyInit__cext","_wasthon_init","_wasthon_module_create","_malloc","_free","_PyInit_pandas_datetime","_PyInit_pandas_parser","_PyInit__common","_PyInit_bit_generator","_PyInit__mt19937","_PyInit__philox","_PyInit__pcg64","_PyInit__sfc64","_PyInit__bounded_integers","_PyInit__generator","_PyInit_mtrand"'
 for M in $TSLIBS $LIBS indexers aggregations testing parsers json; do EXP="$EXP,\"_PyInit_$M\""; done
 CY="$NR/_common.o $NR/bit_generator.o $NR/_mt19937.o $NR/_philox.o $NR/_pcg64.o $NR/_sfc64.o $NR/_bounded_integers.o $NR/_generator.o $NR/mtrand.o"
-ALGO="$NR/mt19937.o $NR/mt19937-jump.o $NR/philox.o $NR/pcg64.o $NR/sfc64.o $NR/legacy-distributions.o"
+ALGO="$NR/mt19937.o $NR/mt19937-jump.o $NR/philox.o $NR/pcg64.o $NR/sfc64.o $NR/legacy-distributions.o $NR/legacy_rand_shims.o"
 
 # shellcheck disable=SC2086
 emcc -O1 $FT "$W"/numpy-probe/obj/*.o "$W"/build/linalg-obj/*.o "$NR/tanh_stub.o" \
