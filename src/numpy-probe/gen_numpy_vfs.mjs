@@ -116,6 +116,88 @@ def assert_allclose(actual, desired, rtol=1e-7, atol=0, equal_nan=True,
 `;
 }
 
+// Platform truth: the C extensions this VFS runs against ARE wasm32, but
+// Brython's platform.machine() stub returns '' — so numpy's own
+// @pytest.mark.skipif(IS_WASM, ...) gates (fp exceptions don't exist in
+// wasm, no asyncio, no threads) stayed dormant and their tests FAILED
+// instead of skipping. Fix machine() at the source for any platform probe,
+// and recompute the flags utils derived before this append ran.
+// HAS_REFCOUNT: Brython's sys.getrefcount exists but returns a constant 0
+// (JS tracing GC — no variable-level reference counting), so the upstream
+// feature probe `getattr(sys, 'getrefcount', None) is not None` is misled.
+// Overridden HERE, not in the vendored Brython: the vendored tree carries
+// only upstreamable bug fixes, and whether Brython should expose a fake
+// getrefcount is Brython's call.
+{
+  const key = 'numpy.testing._private.utils';
+  scripts[key][1] += `
+
+# --- wasthon: platform truth (see gen_numpy_vfs) — the C layer is wasm32.
+import platform as _wasthon_platform
+_wasthon_platform.machine = lambda: 'wasm32'
+IS_WASM = True
+HAS_REFCOUNT = False
+`;
+}
+
+// Upstream-missing test gates, each applied with the criterion numpy itself
+// uses elsewhere in the SAME area — these tests assume machinery their
+// neighbours already gate on. Patterns must match exactly or the build fails
+// (protection against a numpy upgrade silently un-patching).
+{
+  const patch = (mod, from, to, count = 1) => {
+    if (!scripts[mod]) throw new Error(mod + ' not walked');
+    const parts = scripts[mod][1].split(from);
+    if (parts.length - 1 !== count) {
+      throw new Error(mod + ': pattern found ' + (parts.length - 1) + 'x, expected ' + count + ': ' + from.slice(0, 60));
+    }
+    scripts[mod][1] = parts.join(to);
+  };
+
+  // test_dlpack's refcount tests measure CPython's variable-level reference
+  // counting (sys.getrefcount deltas after `del`) — a dozen other test files
+  // gate exactly this on HAS_REFCOUNT (False here: Brython lives on the JS
+  // tracing GC); these two predate the flag and would fail on PyPy too.
+  const dl = 'numpy._core.tests.test_dlpack';
+  patch(dl, 'from numpy.testing import assert_array_equal',
+            'from numpy.testing import HAS_REFCOUNT, assert_array_equal');
+  patch(dl, '    def test_dunder_dlpack_refcount(self, max_version):',
+            '    @pytest.mark.skipif(not HAS_REFCOUNT, reason="Python runtime lacks reference counting")  # wasthon: upstream-missing gate\n' +
+            '    def test_dunder_dlpack_refcount(self, max_version):');
+  patch(dl, '    def test_from_dlpack_refcount(self, arr):',
+            '    @pytest.mark.skipif(not HAS_REFCOUNT, reason="Python runtime lacks reference counting")  # wasthon: upstream-missing gate\n' +
+            '    def test_from_dlpack_refcount(self, arr):');
+
+  // test_longdouble defines string_to_longdouble_inaccurate ("Need strtold_l")
+  // and gates the _bytes/_foreign round-trips with it — but not the primary
+  // one. True here: wasm32 long double is binary128 with no f128 strtold, so
+  // parsing goes through double.
+  patch('numpy._core.tests.test_longdouble',
+        'def test_str_roundtrip():',
+        '@pytest.mark.skipif(string_to_longdouble_inaccurate, reason="Need strtold_l")  # wasthon: upstream-missing gate\n' +
+        'def test_str_roundtrip():');
+
+  // Same criterion, computed locally (test_print has no such flag in scope):
+  // str(longdouble('1.2')) can't round-trip when the parse is double-precise.
+  patch('numpy._core.tests.test_print',
+        '    def test_locale_longdouble(self):\n' +
+        "        assert_equal(str(np.longdouble('1.2')), str(1.2))",
+        '    def test_locale_longdouble(self):\n' +
+        '        _o = 1 + np.finfo(np.longdouble).eps  # wasthon: upstream-missing gate (test_longdouble uses the same)\n' +
+        '        if _o != np.longdouble(str(_o)):\n' +
+        '            pytest.skip("Need accurate strtold")\n' +
+        "        assert_equal(str(np.longdouble('1.2')), str(1.2))");
+
+  // dragon4 interface tests already skip their float128 param when the
+  // longdouble text path is unreliable (IS_MUSL); extend the SAME in-body
+  // gate to the measurable criterion (all four occurrences: positional,
+  // positional_trim, positional_overflow, scientific).
+  patch('numpy._core.tests.test_scalarprint',
+        'if IS_MUSL and tp == np.float128:',
+        'if tp == np.float128 and (IS_MUSL or (lambda _o: _o != np.float128(str(_o)))(1 + np.finfo(np.float128).eps)):  # wasthon: same gate, measurable criterion',
+        4);
+}
+
 // Some dirs are namespace packages with no __init__.py (e.g. numpy/_core/tests),
 // so no package entry was emitted for them and Brython's VFSFinder can't resolve
 // `import numpy._core.tests.test_x`. Synthesize an empty package for every parent
