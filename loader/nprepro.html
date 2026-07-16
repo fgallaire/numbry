@@ -18,10 +18,21 @@ const $B = window.__BRYTHON__;
 globalThis.$B = $B; globalThis.__BRYTHON__ = $B; globalThis._b_ = $B.builtins;
 try {
   const factory = (await import('../build/numpy_multiarray_umath.mjs')).default;
-  const M = await factory();
+  const M = await factory({ print: s => console.log(s), printErr: s => console.log(s) });
   M._wasthon_init();
   if (typeof installWasthonFS === 'function') installWasthonFS(M);
   globalThis.M = M;
+  // JS-stack extractor: record the raw JS error each time Brython wraps one
+  // ($B.exception), so repro code can read the wasm stack after a trap:
+  // `from browser import window; window.jsstack()`.
+  { const oe = $B.exception;
+    $B.exception = function(js){ if (js && js.stack) globalThis.__last_js_exc = js;
+      return oe.apply(this, arguments); };
+    const rt = M.wasthon, of = rt.forwardError;
+    rt.forwardError = function(e, d){ if (e && e.stack) globalThis.__last_js_exc = e;
+      return of.call(this, e, d); }; }
+  globalThis.jsstack = () => { const j = globalThis.__last_js_exc;
+    return (j && String(j.stack || j)) || ''; };
   const orig = $B.$__import__;
   $B.$__import__ = function(mod_name){
     if (mod_name === 'numpy._core._multiarray_umath' && $B.imported[mod_name] === undefined){
