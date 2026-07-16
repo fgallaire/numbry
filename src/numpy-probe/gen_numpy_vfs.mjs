@@ -34,7 +34,20 @@ let n = 0, bytes = 0;
     const isInit = e.name === '__init__.py';
     let mod = rel.replace(/\.py$/, '').replace(/[\/\\]/g, '.');  // numpy.foo.bar
     if (isInit) mod = mod.replace(/\.__init__$/, '');            // numpy.foo (package)
-    const src = fs.readFileSync(full, 'utf8');
+    let src = fs.readFileSync(full, 'utf8');
+    // CPython's float64 DUAL_INHERITs float, so fromhex is inherited; the
+    // bridge keeps float out of float64's bases on purpose (canonicalising
+    // broke PyFloat_AsDouble and the random C init) — graft the constructor
+    // classmethod at import time instead (test_dragon4 builds its exact
+    // doubles with np.float64.fromhex).
+    if (mod === 'numpy') {
+      src += `
+try:
+    float64.fromhex = classmethod(lambda _cls, _s: _cls(float.fromhex(_s)))
+except Exception:
+    pass
+`;
+    }
     scripts[mod] = ['.py', src, [], isInit];
     n++; bytes += src.length;
   }
