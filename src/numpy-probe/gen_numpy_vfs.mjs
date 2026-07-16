@@ -58,6 +58,12 @@ except Exception:
 scripts['numpy.linalg._umath_linalg'] = ['.py', fs.readFileSync(STUB, 'utf8'), [], false];
 n++;
 
+// Minimal ctypes stand-in: prepare_ctypes (BitGenerator.ctypes) builds its
+// interface from c_void_p/cast/CFUNCTYPE over real wasm addresses; only the
+// C call machinery is stubbed (test_direct's test_ctypes never calls).
+scripts['ctypes'] = ['.py', fs.readFileSync(path.join(HERE, 'ctypes_stub.py'), 'utf8'), [], false];
+n++;
+
 // A minimal `pytest` shim so numpy's own test modules (numpy/**/tests/test_*.py,
 // already walked above) import and run under test-numpy.html — real pytest isn't
 // portable. Ships in the VFS so `import pytest` resolves via Brython's VFSFinder.
