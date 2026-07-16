@@ -76,7 +76,7 @@ for f in "$NP"/numpy/_core/src/multiarray/*.c \
          "$NP"/numpy/_core/src/common/*.c "$NP"/numpy/_core/src/common/*.cpp \
          "$NP"/numpy/_core/src/npymath/npy_math.c \
          "$NP"/numpy/_core/src/npymath/halffloat.cpp \
-         "$NP"/numpy/_core/src/npymath/ieee754.cpp \
+         "$HERE"/soft_fenv.c \
          "$NP"/numpy/_core/src/npysort/*.cpp \
          "$GEN"/*.dispatch.c \
          "$GEN"/scalartypes.c "$GEN"/arraytypes.c "$GEN"/loops.c \
@@ -91,6 +91,18 @@ for f in "$NP"/numpy/_core/src/multiarray/*.c \
   then OK=$((OK+1)); else FAIL=$((FAIL+1)); echo "FAIL:$(basename "$f")" >>"$HERE/errors.txt"; fi
 done
 echo "compile: OK=$OK FAIL=$FAIL (expected when written: 90+/0)"
+
+# ieee754.cpp compiles SEPARATELY with real FE_* values: musl-wasm's
+# bits/fenv.h defines no exception flags (FE_ALL_EXCEPT=0), so numpy's
+# "#ifndef FE_INVALID -> 0" fallback turned npy_set/get_floatstatus into
+# no-ops — np.linalg never raised LinAlgError (non-PSD cholesky returned NaN
+# silently). soft_fenv.c supplies the software feraiseexcept/fetestexcept/
+# feclearexcept musl stubs out. ONLY ieee754 gets the defines: with them
+# global, the C++ FloatStatus guards in the half/umath loops go live and
+# test_half regresses 3 -> 21.
+emcc $CFLAGS -DFE_INVALID=1 -DFE_DIVBYZERO=4 -DFE_OVERFLOW=8 -DFE_UNDERFLOW=16 \
+  "$NP"/numpy/_core/src/npymath/ieee754.cpp -o "$OBJ/ieee754.o" 2>>"$HERE/errors.txt" \
+  || echo "FAIL:ieee754-fenv" >>"$HERE/errors.txt"
 
 # 5. the probe link — undefined list = what wasthon.js must implement.
 #    build/wasthon.o comes from any prior module build (./build.sh _pickle).
