@@ -76,12 +76,10 @@ build_pyx() {  # $1 = dotted module name, $2 = pyx path
   local L=$(grep -n "^  #define CYTHON_COMPILING_IN_CPYTHON 1$" "$C" | head -1 | cut -d: -f1)
   [ -n "$L" ] && sed -i "${L}s/#define CYTHON_COMPILING_IN_CPYTHON 1/#define CYTHON_COMPILING_IN_CPYTHON 0/" "$C"
   if [ "$EXT" = "cpp" ]; then
-    # C++ refuses the implicit conversions C allowed: wasthon.h's PyMethodDef
-    # ml_meth is void*, so the initializer's final (PyCFunction) cast must
-    # become void*; same for PyCodeObject* = PyObject* in __Pyx_PyCode_New.
-    sed -i 's/, (PyCFunction)(void\*)(__Pyx_PyCFunction_FastCallWithKeywords)/, (void*)(__Pyx_PyCFunction_FastCallWithKeywords)/g' "$C"
-    sed -i 's/, (PyCFunction)__pyx_/, (void*)(PyCFunction)__pyx_/g' "$C"
-    sed -i 's/, (PyCFunction)__Pyx_/, (void*)(PyCFunction)__Pyx_/g' "$C"
+    # wasthon.h now types ml_meth as PyCFunction (torch lot): Cython's natural
+    # (PyCFunction) initializer casts are correct as-is under C++; the old
+    # void*-era rewrites of the method tables are gone. CyFunction's
+    # func_vectorcall field stays void* — keep that assignment cast.
     perl -0pi -e 's/(\n    result =\n      #if PY_VERSION_HEX)/\n    result = (PyCodeObject *)\n      #if PY_VERSION_HEX/' "$C"
     sed -i 's/vectorcallfunc f = PyVectorcall_Function(func);/vectorcallfunc f = (vectorcallfunc)PyVectorcall_Function(func);/' "$C"
     sed -i 's/__Pyx_CyFunction_func_vectorcall(op) = __Pyx_CyFunction_Vectorcall_/__Pyx_CyFunction_func_vectorcall(op) = (void*)__Pyx_CyFunction_Vectorcall_/g' "$C"
@@ -135,15 +133,42 @@ emcc $CFLAGS $PDRN "$PD/pandas/_libs/src/datetime/date_conversions.c" -o "$OUT/c
 echo "=== done. FAILED:${FAILED:- none} ==="
 ls $OUT/*.o 2>/dev/null | wc -l
 
-# ---- link: numpy core + numpy.random objects (from nprnd.sh) + all pandas
-# objects + wasthon.o, every PyInit exported, ONE module -> build/nppd.{mjs,wasm}.
+# ---- _datetime: CPython's REAL C datetime module (datetime branch). The
+# pandas objects above are compiled against the real packed-struct
+# datetime.h, so the C module MUST be in the bundle (it owns the structs,
+# the types and the genuine PyDateTime_CAPI capsule). Source is verbatim
+# CPython 3.14.6; dtconvert.py (wasthon src) converts the positional
+# static-PyTypeObject initializers to designated ones at copy time and
+# injects the interp-init work datetime_exec needs under the bridge.
 if [ -n "$FAILED" ]; then echo "compile failures — not linking"; exit 1; fi
+CPY="$ROOT/external/Python-3.14.6"
+# The C _datetime module + its real datetime.h come from the CPython 3.14.6
+# source. wasthon's build.sh downloads it too, but only when it builds
+# wasthon-full — a LATER phase than this one — so pdbuild fetches it here if
+# absent (idempotent: a present tree, e.g. a prior wasthon-full build, is reused).
+if [ ! -f "$CPY/Include/datetime.h" ]; then
+  echo "=== fetching Python-3.14.6 source (for the C _datetime module) ==="
+  mkdir -p "$CPY"; _dttmp="$(mktemp)"
+  if command -v curl >/dev/null; then curl -fsSL -o "$_dttmp" "https://www.python.org/ftp/python/3.14.6/Python-3.14.6.tar.xz";
+  else wget -q -O "$_dttmp" "https://www.python.org/ftp/python/3.14.6/Python-3.14.6.tar.xz"; fi
+  tar -xJf "$_dttmp" -C "$CPY" --strip-components=1; rm -f "$_dttmp"
+fi
+[ -f "$CPY/Include/datetime.h" ] || { echo "_datetime: CPython 3.14.6 source unavailable"; exit 1; }
+( cd "$ROOT/build" && \
+  cp "$CPY/Include/datetime.h" datetime_real.h && \
+  mkdir -p clinic && cp "$CPY/Modules/clinic/_datetimemodule.c.h" clinic/ && \
+  python3 "$SRC/dtconvert.py" "$CPY/Modules/_datetimemodule.c" _datetimemodule.c && \
+  emcc -O1 -c -I . -I "$SRC" _datetimemodule.c -o _datetimemodule.o )
+[ -f "$ROOT/build/_datetimemodule.o" ] || { echo "_datetime compile FAILED"; exit 1; }
+
+# ---- link: numpy core + numpy.random objects (from nprnd.sh) + all pandas
+# objects + _datetime + wasthon.o, every PyInit exported, ONE module -> build/nppd.{mjs,wasm}.
 NR="$ROOT/build/nprnd-obj"
-EXP='"_PyInit__multiarray_umath","_wasthon_init","_wasthon_module_create","_malloc","_free","_PyInit_pandas_datetime","_PyInit_pandas_parser","_PyInit__common","_PyInit_bit_generator","_PyInit__mt19937","_PyInit__philox","_PyInit__pcg64","_PyInit__sfc64","_PyInit__bounded_integers","_PyInit__generator","_PyInit_mtrand"'
+EXP='"_PyInit__multiarray_umath","_PyInit__datetime","_wasthon_init","_wasthon_module_create","_malloc","_free","_PyInit_pandas_datetime","_PyInit_pandas_parser","_PyInit__common","_PyInit_bit_generator","_PyInit__mt19937","_PyInit__philox","_PyInit__pcg64","_PyInit__sfc64","_PyInit__bounded_integers","_PyInit__generator","_PyInit_mtrand"'
 for M in $TSLIBS $LIBS indexers aggregations testing parsers json; do EXP="$EXP,\"_PyInit_$M\""; done
 CY="$NR/_common.o $NR/bit_generator.o $NR/_mt19937.o $NR/_philox.o $NR/_pcg64.o $NR/_sfc64.o $NR/_bounded_integers.o $NR/_generator.o $NR/mtrand.o"
 ALGO="$NR/mt19937.o $NR/mt19937-jump.o $NR/philox.o $NR/pcg64.o $NR/sfc64.o $NR/legacy-distributions.o $NR/legacy_rand_shims.o"
-emcc -O1 "$ROOT"/numpy-probe/obj/*.o "$ROOT/build/wasthon.o" "$NR/tanh_stub.o" $CY $ALGO "$NR"/npyrandom/*.o "$OUT"/*.o \
+emcc -O1 "$ROOT"/numpy-probe/obj/*.o "$ROOT/build/wasthon.o" "$ROOT/build/_datetimemodule.o" "$NR/tanh_stub.o" $CY $ALGO "$NR"/npyrandom/*.o "$OUT"/*.o \
   --js-library "$SRC/wasthon.js" --js-library "$CS/cython_support.js" \
   -s ALLOW_MEMORY_GROWTH=1 -s ALLOW_TABLE_GROWTH=1 -sSTACK_SIZE=5242880 --profiling-funcs \
   -Wl,--allow-multiple-definition -s EXPORTED_FUNCTIONS="[$EXP]" \
