@@ -34,9 +34,11 @@ def _expand_params(params):
         names = [n.strip() for n in (argnames.split(",") if isinstance(argnames, str) else argnames)]
         factor = []
         for v in argvalues:
-            val = v.values if type(v).__name__ == "_Param" else v
+            is_param = type(v).__name__ == "_Param"
+            val = v.values if is_param else v
             if len(names) == 1:
-                factor.append({names[0]: val})
+                # a single-name pytest.param carries its value in a 1-tuple
+                factor.append({names[0]: val[0] if is_param and len(val) == 1 else val})
             else:
                 seq = val if isinstance(val, (tuple, list)) else (val,)
                 factor.append(dict(zip(names, seq)))
