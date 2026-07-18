@@ -234,7 +234,8 @@ emcc -O1 "$ROOT"/numpy-probe/obj/*.o "$ROOT/build/wasthon.o" "$ROOT/build/_datet
   --js-library "$SRC/wasthon.js" --js-library "$CS/cython_support.js" \
   -s ALLOW_MEMORY_GROWTH=1 -s ALLOW_TABLE_GROWTH=1 -sSTACK_SIZE=5242880 --profiling-funcs \
   -Wl,--allow-multiple-definition -s EXPORTED_FUNCTIONS="[$EXP]" \
-  -s EXPORTED_RUNTIME_METHODS='["HEAPU8","HEAP32","UTF8ToString","stringToUTF8","lengthBytesUTF8","wasmTable"]' \
+  -s FORCE_FILESYSTEM=1 \
+  -s EXPORTED_RUNTIME_METHODS='["HEAPU8","HEAP32","UTF8ToString","stringToUTF8","lengthBytesUTF8","wasmTable","FS"]' \
   -s MODULARIZE=1 -s EXPORT_ES6=1 -s EXPORT_NAME=nppd \
   -o "$ROOT/build/nppd.mjs" 2>"$OUT/link_err.txt"
 echo "link exit=$? errors=$(grep -c 'error:' "$OUT/link_err.txt")"
