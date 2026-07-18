@@ -40,6 +40,68 @@ PP="-DCYTHON_USE_TYPE_SPECS=1 -DCYTHON_USE_MODULE_STATE=0 -DCYTHON_FAST_THREAD_S
 PDINC="-I $SRC -I $CS -I $ROOT/numpy-probe/gen -I $ROOT/numpy-probe -I $NP/numpy/_core/include -I $NP/numpy/_core/include/numpy -I $NP/numpy/_core/src/common -I $PD/pandas/_libs/include -I $PD/pandas/_libs"
 CFLAGS="-O1 -c -DNDEBUG -DPy_PYTHON_H -DNPY_NO_DEPRECATED_API=0 -DCYTHON_VECTORCALL_TPNEW=0 $PP -Wno-macro-redefined -Wno-int-conversion -Wno-incompatible-pointer-types -include $SRC/patchlevel.h -include $CS/cython_compat.h -include $CS/scipy_compat.h $PDINC"
 
+# KH: khash_python.h reads raw C struct fields — complex ->cval and tuple
+# ->ob_item — which are garbage under the handle bridge (a PyObject* is a
+# handle, not a struct in linear memory): NaN-keyed complex/tuple hashing was
+# garbage-dependent (KeyError on (1+nanj), "index out of bounds" crash on
+# nested tuples). Patch a COPY of the header (source tree untouched) to route
+# through PyComplex_AsCComplex / PyTuple_GET_ITEM, first on the include path.
+KH="$OUT/inc/pandas/vendored/klib"; mkdir -p "$KH"
+cp "$PD/pandas/_libs/include/pandas/vendored/klib/"*.h "$KH/"
+perl -0pi -e 's/(static inline int complexobject_cmp\(PyComplexObject \*a, PyComplexObject \*b\) \{\n)/$1  Py_complex __wca = PyComplex_AsCComplex((PyObject *)a);\n  Py_complex __wcb = PyComplex_AsCComplex((PyObject *)b);\n/' "$KH/khash_python.h"
+perl -0pi -e 's/(static inline Py_hash_t complexobject_hash\(PyComplexObject \*key\) \{\n)/$1  Py_complex __wck = PyComplex_AsCComplex((PyObject *)key);\n/' "$KH/khash_python.h"
+sed -i 's/a->cval/__wca/g; s/b->cval/__wcb/g; s/key->cval/__wck/g' "$KH/khash_python.h"
+sed -i 's/PyObject \*\*item = key->ob_item;/(void)key;/' "$KH/khash_python.h"
+sed -i 's/kh_python_hash_func(item\[i\])/kh_python_hash_func(PyTuple_GET_ITEM((PyObject *)key, i))/' "$KH/khash_python.h"
+# pyobject_cmp's fast path `a == b` is CPython object identity; two bridge
+# handles for the SAME object differ (pd.NA/NaT/None traverse as fresh
+# borrows, then NA == NA raises -> "not equal"). Route through Py_Is.
+sed -i 's/if (a == b) {/if (a == b || Py_Is(a, b)) {/' "$KH/khash_python.h"
+# The pymap/pyset tables store the PyObject* KEY beyond the call. CPython's
+# raw pointer stays valid while the object lives; a bridge handle is freed at
+# handle-scope exit and recycled (the stored key dangles, every later lookup's
+# cmp errors out -> KeyError on tuple/complex keys whose handles aren't
+# value-keyed-stable like str/int/float). Pin stored keys with a real
+# reference on insert, release on del/destroy.
+cat >> "$KH/khash_python.h" <<'WKH'
+
+static inline khuint_t __wasthon_kh_put_pymap(kh_pymap_t *h, PyObject *key, int *ret) {
+  khuint_t k = kh_put_pymap(h, key, ret);
+  if (*ret) Py_INCREF(key);
+  return k;
+}
+#define kh_put_pymap __wasthon_kh_put_pymap
+static inline void __wasthon_kh_del_pymap(kh_pymap_t *h, khuint_t x) {
+  if (kh_exist(h, x)) Py_DECREF(h->keys[x]);
+  kh_del_pymap(h, x);
+}
+#define kh_del_pymap __wasthon_kh_del_pymap
+static inline void __wasthon_kh_destroy_pymap(kh_pymap_t *h) {
+  khuint_t i;
+  if (h) { for (i = kh_begin(h); i != kh_end(h); ++i) if (kh_exist(h, i)) Py_DECREF(h->keys[i]); }
+  kh_destroy_pymap(h);
+}
+#define kh_destroy_pymap __wasthon_kh_destroy_pymap
+static inline khuint_t __wasthon_kh_put_pyset(kh_pyset_t *h, PyObject *key, int *ret) {
+  khuint_t k = kh_put_pyset(h, key, ret);
+  if (*ret) Py_INCREF(key);
+  return k;
+}
+#define kh_put_pyset __wasthon_kh_put_pyset
+static inline void __wasthon_kh_del_pyset(kh_pyset_t *h, khuint_t x) {
+  if (kh_exist(h, x)) Py_DECREF(h->keys[x]);
+  kh_del_pyset(h, x);
+}
+#define kh_del_pyset __wasthon_kh_del_pyset
+static inline void __wasthon_kh_destroy_pyset(kh_pyset_t *h) {
+  khuint_t i;
+  if (h) { for (i = kh_begin(h); i != kh_end(h); ++i) if (kh_exist(h, i)) Py_DECREF(h->keys[i]); }
+  kh_destroy_pyset(h);
+}
+#define kh_destroy_pyset __wasthon_kh_destroy_pyset
+WKH
+CFLAGS="-I $OUT/inc $CFLAGS"
+
 # generate the .pxi helpers from their tempita templates (a git-tag tree only
 # has the .pxi.in; the Tempita engine ships inside the pinned Cython).
 for T in "$PD"/pandas/_libs/*.pxi.in; do
