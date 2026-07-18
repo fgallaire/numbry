@@ -3,6 +3,11 @@
 <head>
 <meta charset="utf-8">
 <title>wasthon — numpy suite dashboard</title>
+<script src="./brython/brython.js"></script>
+<script src="./brython/brython_stdlib.js"></script>
+<script src="../build/numpy_vfs.js"></script>
+<script src="./wasthon-io-write.js"></script>
+<script src="./wasthon-fs.js"></script>
 <style>
   body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
   table { border-collapse: collapse; width: 100%; font-size: 14px; }
@@ -26,15 +31,11 @@
 <p style="font-size:0.85em;margin:0 0 1em 0;"><a href="index.html">← back to index</a></p>
 <h1>wasthon — numpy suite dashboard</h1>
 <p style="color:#666;font-size:0.9em;max-width:74ch;">
-  Runs modules from <b>numpy 2.5.1</b>'s own test suite
-  (<code>numpy/**/tests/test_*.py</code>) against wasthon, each in a fresh page
-  (<code>test-numpy.html?test=…</code>) so no module contaminates another. A minimal
-  <code>pytest</code> shim supplies <code>raises</code>/<code>mark.parametrize</code>/
-  <code>fixture</code>/… Scores are numpy's own assertions. Only the pytest-portable
-  subset is listed — modules needing <code>numpy.random</code>, C test-extensions,
-  <code>ctypes</code>/<code>mmap</code>/<code>zoneinfo</code>, or <code>hypothesis</code>
-  are out of scope. Failures are real bridge/behaviour gaps (the backlog to fix);
-  a few come from the shim's fixture limits.
+  Runs numpy 2.5.1's own test modules (core + numpy.random) against the combined
+  numpy + numpy.random wasm. brython + the VFS + the wasm load <b>once</b> and the
+  modules run sequentially in one interpreter — no per-module reload. Per-module
+  detail goes to the browser console; the page shows the table. Cross-module state
+  is shared (the iframe dashboard stays the isolation reference).
 </p>
 
 <table id="results">
@@ -43,12 +44,194 @@
   </tr></thead>
   <tbody></tbody>
 </table>
-
 <div id="summary">⏳ Running…</div>
 
-<script>
-// numpy test modules from the pytest-portable subset, cleanest first. Each runs
-// in its own iframe (fresh numpy) — the C core corrupts if many share one page.
+<script type="text/x-numpy-runner" id="runner">
+import pytest as _pt
+
+def _expand_params(params):
+    if not params:
+        return [{}]
+    result = [{}]
+    for argnames, argvalues in reversed(params):
+        names = [n.strip() for n in (argnames.split(",") if isinstance(argnames, str) else argnames)]
+        factor = []
+        for v in argvalues:
+            is_param = type(v).__name__ == "_Param"
+            val = v.values if is_param else v
+            if len(names) == 1:
+                # a single-name pytest.param carries its value in a 1-tuple
+                factor.append({names[0]: val[0] if is_param and len(val) == 1 else val})
+            else:
+                seq = val if isinstance(val, (tuple, list)) else (val,)
+                factor.append(dict(zip(names, seq)))
+        new = []
+        for base in result:
+            for f in factor:
+                d = dict(base); d.update(f); new.append(d)
+        result = new
+    return result
+
+def _expand(func):
+    return _expand_params(getattr(func, "_pytest_params", None))
+
+class _Request:
+    # pytest's `request` argument, minimally: .param (parametrized fixtures)
+    # and .getfixturevalue (test_finfo resolves its ma fixtures by name).
+    def __init__(self, mod, param=None):
+        self._mod = mod
+        self.param = param
+    def getfixturevalue(self, name):
+        return _call_fixture(self._mod, name, None)
+
+_fixture_finalizers = []
+
+def _call_fixture(mod, name, param):
+    # NEVER convert an unresolved fixture into a skip: call any callable of
+    # that name (works even when the VFS carries an older pytest shim whose
+    # @fixture doesn't mark functions); a missing name raises the REAL error
+    # so the test counts as failed, as pytest would.
+    fn = getattr(mod, name, None)
+    if fn is None or not callable(fn):
+        raise AttributeError("fixture " + name + " not found in module")
+    args = ()
+    code = getattr(fn, "__code__", None)
+    if code is not None and code.co_argcount and code.co_varnames[0] == "request":
+        args = (_Request(mod, param),)
+    res = fn(*args)
+    if hasattr(res, "__next__"):
+        gen = res
+        res = next(gen)   # yield fixture: setup value
+        _fixture_finalizers.append(gen)  # teardown after the test (below)
+    return res
+
+def _fixture_cases(func, mod, cases):
+    # pytest fixture injection, minimally: resolve a test's missing
+    # positional args through module-level @pytest.fixture functions.
+    # A params= fixture multiplies the cases (its value reaches the
+    # fixture body via request.param); `request` gets the stub above.
+    code = getattr(func, "__code__", None)
+    if code is None or mod is None:
+        return cases
+    names = [n for n in code.co_varnames[:code.co_argcount] if n != "self"]
+    for name in names:
+        if all(name in c for c in cases):
+            continue
+        if name == "request":
+            for c in cases:
+                c.setdefault("request", _Request(mod))
+            continue
+        fn = getattr(mod, name, None)
+        if fn is None or not getattr(fn, "_pytest_fixture", False):
+            continue
+        params = getattr(fn, "_pytest_fixture_params", None)
+        if params:
+            new = []
+            for c in cases:
+                for p in params:
+                    d = dict(c); d[name] = _call_fixture(mod, name, p); new.append(d)
+            cases = new
+        else:
+            for c in cases:
+                c[name] = _call_fixture(mod, name, None)
+    return cases
+
+def _run_one(func, label, out, mod=None, base=None):
+    if getattr(func, "_pytest_skip", False):
+        out[2] += 1; return
+    try:
+        cases = _expand(func)
+        if base:
+            merged = []
+            for b in base:
+                for c in cases:
+                    d = dict(b); d.update(c); merged.append(d)
+            cases = merged
+        cases = _fixture_cases(func, mod, cases)
+    except Exception:
+        cases = [{}]
+    for kwargs in cases:
+        try:
+            func(**kwargs)
+            out[0] += 1
+        except _pt.Skipped:
+            out[2] += 1
+        except _pt.XFailed:
+            out[2] += 1
+        except BaseException as e:
+            if getattr(func, "_pytest_xfail", False):
+                out[2] += 1; continue
+            out[1] += 1
+            out[3].append(label + ": " + type(e).__name__ + ": " + str(e)[:80])
+    for _g in _fixture_finalizers:
+        try:
+            next(_g)
+        except StopIteration:
+            pass
+        except BaseException:
+            pass
+    del _fixture_finalizers[:]
+
+def run_module(mod):
+    out = [0, 0, 0, []]   # passed, failed, skipped, failmsgs
+    names = dir(mod)
+    for name in names:
+        if not name.startswith("test_"):
+            continue
+        obj = getattr(mod, name, None)
+        if callable(obj) and not isinstance(obj, type):
+            _run_one(obj, name, out, mod)
+    for name in names:
+        cls = getattr(mod, name, None)
+        if isinstance(cls, type) and name.startswith("Test"):
+            if getattr(cls, "_pytest_skip", False):
+                continue
+            # pytest runs setup_class ONCE before the class's tests; numpy's
+            # test_direct loads its CSV seed/data vectors there — without it
+            # every test read the class-level empty dict (KeyError: 'seed').
+            # Failure semantics match pytest: error -> every test errors,
+            # pytest.skip -> every test skips.
+            sc_exc = None
+            sc = getattr(cls, "setup_class", None)
+            if sc:
+                try: sc()
+                except _pt.Skipped: sc_exc = "skip"
+                except BaseException as e:
+                    sc_exc = "setup_class " + type(e).__name__ + ": " + str(e)[:60]
+            for mname in dir(cls):
+                if not mname.startswith("test_"):
+                    continue
+                # Skip non-callable class attributes that merely start with
+                # "test_" — e.g. numpy's parametrize DATA tables
+                # (`test_cases_gh_28679 = [...]` in test_scalarprint). Collecting
+                # them as tests raised "'list' object is not callable" =
+                # phantom failures. (The module-level loop already guards this.)
+                if not callable(getattr(cls, mname, None)):
+                    continue
+                if sc_exc == "skip":
+                    out[2] += 1; continue
+                if sc_exc:
+                    out[1] += 1; out[3].append(name + "." + mname + ": " + sc_exc); continue
+                try:
+                    inst = cls()
+                except BaseException as e:
+                    out[1] += 1; out[3].append(name + "." + mname + ": ctor " + type(e).__name__); continue
+                for setup in ("setup_method", "setup"):
+                    su = getattr(inst, setup, None)
+                    if su:
+                        try: su()
+                        except TypeError:
+                            try: su(getattr(inst, mname))
+                            except Exception: pass
+                        except Exception: pass
+                        break
+                _run_one(getattr(inst, mname), name + "." + mname, out, mod,
+                         _expand_params(getattr(cls, "_pytest_params", None)))
+    return out
+</script>
+
+<script type="module">
+const log = (s) => console.log(s);
 const MODULES = [
   'numpy._core.tests.test_indexerrors',
   'numpy._core.tests.test_abc',
@@ -87,110 +270,143 @@ const MODULES = [
   'numpy.random.tests.test_random',
   'numpy.random.tests.test_regression',
 ];
-
-// numpy.random tests need the combined wasm (numpy core + the 9 Cython random
-// modules in one shared memory); everything else uses the numpy-core runner.
-function runnerFor(mod) {
-  return mod.startsWith('numpy.random.') ? 'test-numpy-random.html' : 'test-numpy.html';
-}
-
-const TIMEOUT_MS = 120_000;
-const POLL_MS = 300;
-
-function shortName(m) { return m.split('.').slice(-1)[0] + ' · ' + m.split('.').slice(0, -1).slice(-2).join('.'); }
-
+function shortName(m) { return m.split('.').slice(-1)[0] + ' · ' + m.split('.').slice(0,-1).slice(-2).join('.'); }
 function init() {
   const tbody = document.querySelector('#results tbody');
   for (const m of MODULES) {
-    const tr = document.createElement('tr');
-    tr.className = 'pending';
-    tr.innerHTML = `<td><a href="${runnerFor(m)}?test=${m}" target="_blank">${shortName(m)}</a></td>
-      <td class="num">—</td><td class="num">—</td><td class="num">—</td>
-      <td class="num">—</td><td>—</td><td>⏳</td>`;
+    const tr=document.createElement('tr'); tr.className='pending';
+    tr.innerHTML=`<td><a href="${ m.startsWith('numpy.random.')?'test-numpy-random.html':'test-numpy.html' }?test=${m}" target="_blank">${shortName(m)}</a></td>
+      <td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td>—</td><td>⏳</td>`;
     tbody.appendChild(tr);
   }
 }
-function setRow(idx, cls, cells) {
-  const tr = document.querySelector('#results tbody').children[idx];
-  tr.className = cls;
-  for (let i = 0; i < cells.length; i++) tr.children[i + 1].innerHTML = cells[i];
+function setRow(idx,cls,cells) {
+  const tr=document.querySelector('#results tbody').children[idx]; tr.className=cls;
+  for (let i=0;i<cells.length;i++) tr.children[i+1].innerHTML=cells[i];
 }
-function parseCounts(log) {
-  const g = (re) => { const m = log.match(re); return m ? parseInt(m[1], 10) : null; };
-  const imp = log.match(/IMPORT FAILED:\s*(.+)/);
-  return {
-    ran: g(/ran\s*=\s*(\d+)/),
-    passed: g(/passed\s*=\s*(\d+)/),
-    fail: g(/failed\+errored\s*=\s*(\d+)/),
-    skipped: g(/skipped\s*=\s*(\d+)/),
-    importFailed: !!imp,
-    importMsg: imp ? imp[1].trim().slice(0, 120) : '',
-  };
-}
-
-function runOne(mod, idx) {
-  setRow(idx, 'running', ['…', '…', '…', '…', '…', '🔄']);
-  return new Promise(resolve => {
-    const iframe = document.createElement('iframe');
-    iframe.style.display = 'none';
-    iframe.src = `${runnerFor(mod)}?test=${mod}`;
-    document.body.appendChild(iframe);
-    const finish = (result) => {
-      clearInterval(poller); clearTimeout(timer);
-      try { document.body.removeChild(iframe); } catch (_) {}
-      resolve(result);
-    };
-    const poller = setInterval(() => {
-      let doc;
-      try { doc = iframe.contentDocument; } catch (_) { return; }
-      if (!doc) return;
-      const el = doc.querySelector('#log');
-      if (!el) return;
-      const log = el.textContent || '';
-      if (!log.includes('=== done ===')) return;
-      const c = parseCounts(log);
-      if (c.importFailed) {
-        setRow(idx, 'importfail', ['—', '—', '—', '—', '—', '⚠ ' + (c.importMsg || 'import failed')]);
-        finish({ importFailed: true }); return;
-      }
-      const fail = c.fail || 0, ran = c.ran || 0, passed = c.passed || 0, skipped = c.skipped || 0;
-      const runnable = passed + fail;
-      // 0 runnable (everything skipped): nothing failed — that's 100%,
-      // not 0% (the 1.0 gate is pass/(pass+fail), skips excluded).
-      const rate = runnable ? Math.round(100 * passed / runnable) : 100;
-      const bar = `<span class="barbg"><span class="bar" style="width:${Math.round(0.8 * rate)}px"></span></span> ${rate}%`;
-      const allpass = fail === 0 && ran > 0;
-      setRow(idx, allpass ? 'allpass' : 'somefail', [ran, passed, fail, skipped, bar, allpass ? '✓' : '✗']);
-      finish({ ran, passed, fail, skipped, allpass });
-    }, POLL_MS);
-    const timer = setTimeout(() => {
-      setRow(idx, 'timeout', ['—', '—', '—', '—', '—', '⏱ timeout']);
-      finish({ timeout: true });
-    }, TIMEOUT_MS);
-  });
-}
-
-async function runAll() {
-  let totRan = 0, totPass = 0, totFail = 0, totSkip = 0, modsOK = 0, modsRun = 0, importFails = 0;
-  for (let i = 0; i < MODULES.length; i++) {
-    const r = await runOne(MODULES[i], i);
-    if (r.importFailed) { importFails++; continue; }
-    if (r.timeout) continue;
-    modsRun++;
-    if (r.allpass) modsOK++;
-    totRan += r.ran; totPass += r.passed; totFail += r.fail; totSkip += r.skipped;
-    const runnable = totPass + totFail;
-    document.getElementById('summary').innerHTML =
-      `<b>${modsOK}/${modsRun}</b> modules fully green &nbsp;|&nbsp; assertions: ` +
-      `<b>${totPass}/${runnable}</b> pass (${runnable ? Math.round(100 * totPass / runnable) : 100}%), ` +
-      `${totFail} fail, ${totSkip} skip` +
-      (importFails ? ` &nbsp;|&nbsp; ${importFails} import-failed` : '') +
-      (i + 1 < MODULES.length ? ' &nbsp;·&nbsp; running…' : '');
-  }
-}
-
 init();
-runAll();
+
+const $B = window.__BRYTHON__;
+globalThis.$B=$B; globalThis.__BRYTHON__=$B; globalThis._b_=$B.builtins;
+
+try {
+  const factory = (await import('../build/nprnd.mjs')).default;
+  const M = await factory();
+  M._wasthon_init();
+  if (typeof installWasthonFS === 'function') installWasthonFS(M);
+
+  // The 9 numpy.random C extensions → their PyInit export (numpy core's
+  // _multiarray_umath is handled separately below).
+  const RAND_C = {
+    'numpy.random._common':           '_PyInit__common',
+    'numpy.random.bit_generator':     '_PyInit_bit_generator',
+    'numpy.random._bounded_integers': '_PyInit__bounded_integers',
+    'numpy.random._mt19937':          '_PyInit__mt19937',
+    'numpy.random._philox':           '_PyInit__philox',
+    'numpy.random._pcg64':            '_PyInit__pcg64',
+    'numpy.random._sfc64':            '_PyInit__sfc64',
+    'numpy.random._generator':        '_PyInit__generator',
+    'numpy.random.mtrand':            '_PyInit_mtrand',
+  };
+  function makeCMod(mod_name, pyinit){
+    if ($B.imported[mod_name] !== undefined) return true;
+    const parts = mod_name.split('.');
+    const parent = parts.slice(0, -1).join('.');
+    const def = M[pyinit]();
+    // The C module def carries only the short m_name; give the created module
+    // its FULL dotted __name__ so Brython derives __package__ and the module's
+    // own relative imports (from ._pcg64 import PCG64) resolve during exec.
+    try { const di = M.wasthon.moduleDefs.get(def); if (di) di.name = mod_name; } catch(e){}
+    const cmod = M._wasthon_module_create(def);
+    if (cmod === 0) return false;
+    const m = M.wasthon.handles.get(cmod);
+    $B.imported[mod_name] = m;
+    try { $B.str_dict_set($B.get_dict($B.imported[parent]), parts[parts.length-1], m); } catch(e){}
+    return true;
+  }
+
+  // hook __import__ to create the C extensions lazily (numpy core + the 9 random)
+  const orig = $B.$__import__;
+  $B.$__import__ = function(mod_name){
+    if (mod_name === 'numpy._core._multiarray_umath' && $B.imported[mod_name] === undefined){
+      const def = M._PyInit__multiarray_umath();
+      const cmod = M._wasthon_module_create(def);
+      if (cmod !== 0){
+        $B.imported[mod_name] = M.wasthon.handles.get(cmod);
+        try { $B.str_dict_set($B.get_dict($B.imported['numpy._core']), '_multiarray_umath', $B.imported[mod_name]); } catch(e){}
+      }
+    } else if (typeof mod_name === 'string' && RAND_C[mod_name] && $B.imported[mod_name] === undefined){
+      try { makeCMod(mod_name, RAND_C[mod_name]); } catch(e){}
+    } else if (mod_name === 'numpy.linalg._umath_linalg' && $B.imported[mod_name] === undefined){
+      // real LAPACK (f2c'd lapack_lite + umath_linalg) instead of the VFS stub
+      try { makeCMod(mod_name, '_PyInit__umath_linalg'); } catch(e){}
+    }
+    return orig.apply(this, arguments);
+  };
+
+  // driver: register run_module, import the target, run it, print machine-
+  // readable counts for the dashboard poller (ran=/passed=/failed+errored=/skipped=).
+  
+  const runnerSrc = document.getElementById('runner').textContent;
+  const breathe = () => new Promise(r => setTimeout(r, 60));
+  let totRan=0,totPass=0,totFail=0,totSkip=0,modsOK=0,modsRun=0,importFails=0;
+
+  for (let i=0;i<MODULES.length;i++) {
+    const mod=MODULES[i];
+    setRow(i,'running',['…','…','…','…','…','🔄']);
+    await breathe();
+    const driver = runnerSrc +
+      "\n\ntry:" +
+      "\n    _mod = __import__(" + JSON.stringify(mod) + ", fromlist=[\"_\"])" +
+      "\nexcept BaseException as _e:" +
+      "\n    print(\"IMPORT FAILED: \" + type(_e).__name__ + \": \" + str(_e)[:150])" +
+      "\nelse:" +
+      "\n    _p, _f, _s, _fails = run_module(_mod)" +
+      "\n    print(\"ran=\" + str(_p + _f + _s))" +
+      "\n    print(\"passed=\" + str(_p))" +
+      "\n    print(\"failed+errored=\" + str(_f))" +
+      "\n    print(\"skipped=\" + str(_s))" +
+      "\n    for _m in _fails[:12]:" +
+      "\n        print(\"  FAIL \" + _m)" +
+      "\n";
+    let buf='';
+    const t0=performance.now();
+    const oc=console.log;
+    console.log=(...a)=>{ buf+=a.map(x=>typeof x==='string'?x:String(x)).join(' '); };
+    try { $B.runPythonSource(driver, 'numpy_one_' + mod.replace(/\./g,'_')); }
+    catch(e){ buf+='\nMODULE CRASH: '+(e&&(e.args?String(e.args[0]):e.message||e)); }
+    finally { console.log=oc; }
+    const secs=((performance.now()-t0)/1000).toFixed(1);
+    console.log('=== module: '+mod+' ===\n'+buf+'('+secs+' s)');
+    const g=(re)=>{const m=buf.match(re);return m?parseInt(m[1],10):null;};
+    const imp=buf.match(/IMPORT FAILED:\s*(.+)/);
+    if (imp) {
+      importFails++; setRow(i,'importfail',['—','—','—','—','—','⚠ '+imp[1].trim().slice(0,120)]);
+    } else {
+      const ran=g(/ran\s*=\s*(\d+)/)||0,passed=g(/passed\s*=\s*(\d+)/)||0;
+      const fail=g(/failed\+errored\s*=\s*(\d+)/)||0,skipped=g(/skipped\s*=\s*(\d+)/)||0;
+      modsRun++; const allpass=fail===0&&ran>0; if(allpass)modsOK++;
+      totRan+=ran;totPass+=passed;totFail+=fail;totSkip+=skipped;
+      const rn=passed+fail,rate=rn?Math.round(100*passed/rn):100;
+      const bar=`<span class="barbg"><span class="bar" style="width:${Math.round(0.8*rate)}px"></span></span> ${rate}%`;
+      setRow(i,allpass?'allpass':'somefail',[ran,passed,fail,skipped,bar,allpass?'✓':'✗ '+secs+'s']);
+    }
+    const rn=totPass+totFail;
+    document.getElementById('summary').innerHTML=
+      `<b>${modsOK}/${modsRun}</b> modules fully green &nbsp;|&nbsp; assertions: `+
+      `<b>${totPass}/${rn}</b> pass (${rn?Math.round(100*totPass/rn):100}%), `+
+      `${totFail} fail, ${totSkip} skip`+
+      (importFails?` &nbsp;|&nbsp; ${importFails} import-failed`:'')+
+      (i+1<MODULES.length?' &nbsp;·&nbsp; running…':'');
+    await breathe();
+  }
+  log('=== GRAND TOTAL (numpy) passed='+totPass+' failed='+totFail+' skipped='+totSkip+' ran='+totRan+' ===');
+  log('=== done ==='); globalThis.__ALL_DONE__=true;
+} catch(e) {
+  const summ=document.getElementById('summary');
+  if(summ) summ.innerHTML='❌ BOOT FAILED: '+(e&&(e.args?String(e.args[0]):(e.message||e)));
+  console.error('BOOT FAILED',e); globalThis.__ALL_DONE__=true;
+}
 </script>
 </body>
 </html>
