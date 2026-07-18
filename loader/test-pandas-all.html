@@ -217,8 +217,20 @@ def _upstream_pin_skips(mod):
                 except Exception:
                     pass
 
+    # TZ/tzset does not exist in the browser: the test drives dateutil
+    # through os.environ["TZ"] + time.tzset(). Upstream skips it on
+    # Windows and musl for the same reason — emscripten IS musl.
+    if mod.__name__.endswith("test_parsing"):
+        _f = getattr(mod, "test_parsing_tzlocal_deprecated", None)
+        if _f is not None:
+            try:
+                _f._pytest_skip = "no TZ/tzset in the browser (upstream skips on musl)"
+            except Exception:
+                pass
+
 def run_module(mod):
     _wire_hashtable_del()
+    _upstream_pin_skips(mod)
     out = [0, 0, 0, []]   # passed, failed, skipped, failmsgs
     names = dir(mod)
     for name in names:
