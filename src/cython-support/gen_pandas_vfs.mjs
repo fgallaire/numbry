@@ -37,7 +37,17 @@ function walk(dir, rootParent) {
     const isInit = e.name === '__init__.py';
     let mod = rel.replace(/\.py$/, '').replace(/[\/]/g, '.');
     if (isInit) mod = mod.replace(/\.__init__$/, '');
-    const src = fs.readFileSync(full, 'utf8');
+    let src = fs.readFileSync(full, 'utf8');
+    if (mod === 'pandas.util._exceptions') {
+      // find_stack_level: VFS module filenames are DOTTED (VFS.pandas.tests…)
+      // while dirname(pd.__file__) is "VFS.pandas" — the slash-joined
+      // "VFS.pandas/tests" never matches, every TEST frame counts as
+      // pandas-internal, stacklevel overshoots and pandas' own
+      // assert_produces_warning stacklevel check fails on every C-raised
+      // deprecation. Join with a dot to match the runtime's scheme.
+      src = src.replace('test_dir = os.path.join(pkg_dir, "tests")',
+                        'test_dir = pkg_dir + ".tests"');
+    }
     scripts[mod] = ['.py', src, [], isInit];
     n++; bytes += src.length;
   }
