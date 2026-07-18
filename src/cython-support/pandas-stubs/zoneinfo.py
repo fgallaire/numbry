@@ -28,7 +28,20 @@ def _data(key):
 
 
 class ZoneInfo(_tzfile):
+    # CPython's constructor caches per key: ZoneInfo("UTC") is ZoneInfo("UTC")
+    # (pandas' is_utc/tz_compare rely on that identity).
+    _cache = {}
+
+    def __new__(cls, key):
+        inst = cls._cache.get(key)
+        if inst is None:
+            inst = super().__new__(cls)
+            cls._cache[key] = inst
+        return inst
+
     def __init__(self, key):
+        if getattr(self, "_key", None) == key:
+            return  # cached instance, already built
         super().__init__(BytesIO(_data(key)), filename=key)
         self._key = key
 
@@ -38,7 +51,18 @@ class ZoneInfo(_tzfile):
 
     @classmethod
     def no_cache(cls, key):
-        return cls(key)
+        obj = _tzfile.__new__(cls)
+        _tzfile.__init__(obj, BytesIO(_data(key)), filename=key)
+        obj._key = key
+        return obj
+
+    @classmethod
+    def clear_cache(cls, *, only_keys=None):
+        if only_keys is None:
+            cls._cache.clear()
+        else:
+            for k in only_keys:
+                cls._cache.pop(k, None)
 
     @classmethod
     def from_file(cls, fobj, key=None):
