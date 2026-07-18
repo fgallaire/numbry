@@ -31,14 +31,12 @@ sed -i 's/reinterpret_cast<PyTracebackObject \*>/reinterpret_cast<__wasthon_tb *
 sed -i 's/return o->ob_type == \&PyStaticMethod_Type;/return Py_TYPE(o) == \&PyStaticMethod_Type;/' "$P/pytypes.h"
 sed -i 's/src\.ptr()->ob_type->tp_as_number/Py_TYPE(src.ptr())->tp_as_number/' "$P/cast.h"
 sed -i 's/type->tp_as_async = \&heap_type->as_async;/\/* wasthon: no as_async *\//' "$P/detail/class.h"
-sed -i 's/= reinterpret_cast<PyCFunction>(reinterpret_cast<void (\*)()>(dispatcher));/= reinterpret_cast<void *>(dispatcher);/' "$P/pybind11.h"
 sed -i 's/tstate = PyGILState_GetThisThreadState();/tstate = (PyThreadState *)PyGILState_GetThisThreadState();/' "$P/gil.h"
 
-# pypocketfft's raw-C-API method tables use (PyCFunction) casts the bridge's
-# void* ml_meth rejects in C++ (good_size / prev_good_size).
+# pypocketfft's raw-C-API method tables use (PyCFunction) casts — correct
+# as-is now that the bridge types ml_meth as PyCFunction (torch lot).
 PYP="$OUT/pypocketfft.cxx"
 cp "$ND/scipy/fft/_pocketfft/pypocketfft.cxx" "$PYP"
-sed -i 's/( *PyCFunction *)/(void *)/g' "$PYP"
 
 NPINC="-I $ROOT/numpy-probe/gen -I $ROOT/numpy-probe -I $NP/numpy/_core/include -I $NP/numpy/_core/include/numpy -I $NP/numpy/_core/src/common"
 # Single-threaded wasm: compile pocketfft's threading out (default nthreads=1

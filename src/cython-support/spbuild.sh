@@ -129,22 +129,17 @@ build_pyx() {  # $1 = dotted module name, $2 = "cplus" for C++ mode
   local L=$(grep -n "^  #define CYTHON_COMPILING_IN_CPYTHON 1$" "$C" | head -1 | cut -d: -f1)
   [ -n "$L" ] && sed -i "${L}s/#define CYTHON_COMPILING_IN_CPYTHON 1/#define CYTHON_COMPILING_IN_CPYTHON 0/" "$C"
   if [ "$EXT" = "cpp" ]; then
-    # The bridge's PyMethodDef declares ml_meth as void*; C++ (unlike C)
-    # refuses the implicit function-pointer conversion in the struct
-    # initializers, so make the cast explicit there (and only there — the
-    # (PyCFunction) CALL casts added above must stay function-typed).
-    perl -0pi -e 's/\{"([^"]*)", \(PyCFunction\)/{"$1", (void *)/g' "$C"
+    # wasthon.h now types ml_meth as PyCFunction (torch lot): Cython's natural
+    # (PyCFunction) cast in the method-table initializers is correct as-is
+    # under C++ — the old void*-era rewrite of those initializers is gone.
     # …and the reverse direction: reading the void* slot back into a
     # typed function pointer.
     perl -0pi -e 's/vectorcallfunc f = __Pyx_PyVectorcall_Function\(func\);/vectorcallfunc f = (vectorcallfunc)__Pyx_PyVectorcall_Function(func);/g' "$C"
-    # The unbound-method PyMethodDef feeds a PyCFunction-typed reinterpret
-    # into the bridge's void* ml_meth slot — cast it too (C++ only).
-    perl -0pi -e 's/(__PYX_REINTERPRET_FUNCION\(PyCFunction, __Pyx_SelflessCall\))/(void *)$1/g' "$C"
-    # Cython's CyFunction runtime writes function pointers straight into the
-    # bridge's void* slots — ml_meth (the annotate method def) and
-    # func_vectorcall (the METH_* dispatch table). C accepts fn-ptr -> void*
-    # implicitly; C++ needs the cast at each such site.
-    perl -0pi -e 's/\(PyCFunction\)\(void \(\*\)\(void\)\)/(void *)(void (*)(void))/g' "$C"
+    # ml_meth is now PyCFunction (torch lot): the unbound-method reinterpret
+    # (__PYX_REINTERPRET_FUNCION(PyCFunction, __Pyx_SelflessCall)) and the
+    # annotate method def's (PyCFunction)(void(*)(void)) cast both already
+    # yield PyCFunction — correct as-is, no rewrite. Only func_vectorcall
+    # stays a void* slot, so that one assignment keeps its cast.
     perl -0pi -e 's/(__Pyx_CyFunction_func_vectorcall\(op\) = )(__Pyx_CyFunction_Vectorcall_\w+)/${1}(void *)$2/g' "$C"
     # …and reading those void* slots back into typed locals (the CyFunction
     # dispatch reads ml_meth / func_vectorcall to call through them).
