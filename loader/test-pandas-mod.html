@@ -146,7 +146,37 @@ def _run_one(func, label, out, mod=None, base=None):
             out[1] += 1
             out[3].append(label + ": " + type(e).__name__ + ": " + str(e)[:80])
 
+def _wire_hashtable_del():
+    # CPython frees a hashtable at `del table` (refcount 0); Brython's `del`
+    # calls __del__ instead. Route the *HashTable classes' __del__ to the
+    # page's gcFinalize hook so kh_destroy (and its tracemalloc untrack)
+    # runs at del-time — test_tracemalloc_* assert exactly that.
+    try:
+        from browser import window
+        if not hasattr(window, "__wasthon_gcfinalize"):
+            return
+        import sys
+        ht = sys.modules.get("pandas._libs.hashtable")
+        if ht is None or getattr(ht, "_wasthon_del_wired", False):
+            return
+        def _del(self):
+            try:
+                window.__wasthon_gcfinalize(self)
+            except Exception:
+                pass
+        for _n in dir(ht):
+            _c = getattr(ht, _n, None)
+            if isinstance(_c, type) and _n.endswith("HashTable"):
+                try:
+                    _c.__del__ = _del
+                except Exception:
+                    pass
+        ht._wasthon_del_wired = True
+    except Exception:
+        pass
+
 def run_module(mod):
+    _wire_hashtable_del()
     out = [0, 0, 0, []]   # passed, failed, skipped, failmsgs
     names = dir(mod)
     for name in names:
@@ -269,6 +299,11 @@ try {
   const factory = (await import('../build/nppd.mjs')).default;
   const M = await factory();
   M._wasthon_init();
+  // CPython's `del table` destroys at refcount 0; Brython's `del` calls
+  // __del__ immediately instead. The runner wires the hashtable classes'
+  // __del__ to this hook so their C destructor (khash destroy + tracemalloc
+  // untrack) runs at del-time like CPython (test_tracemalloc_* measure it).
+  globalThis.__wasthon_gcfinalize = (o) => { try { M.wasthon.gcFinalize(o); return 1; } catch (e) { return 0; } };
 
   function runMA() {
     const name = 'numpy._core._multiarray_umath';

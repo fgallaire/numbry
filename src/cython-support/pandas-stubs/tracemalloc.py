@@ -1,7 +1,9 @@
-# Browser stub of tracemalloc: pandas/tests/libs/test_hashtable.py imports it
-# at module level to measure khash allocations. No allocation tracing exists
-# under the bridge; snapshots come back empty (size assertions fail, the rest
-# of the module runs).
+# Browser implementation of stdlib tracemalloc, backed by the bridge's real
+# PyTraceMalloc_Track/Untrack bookkeeping (wasthon.js keeps a
+# (domain, ptr) -> size Map on globalThis.__wasthon_tracemalloc while tracing
+# is on). Enough for pandas/tests/libs/test_hashtable.py: khash allocations
+# are domain-tagged (KHASH_TRACE_DOMAIN) and the tests only domain-filter
+# snapshots and sum trace sizes.
 
 
 class DomainFilter:
@@ -20,12 +22,28 @@ class Filter:
         self.domain = domain
 
 
+class Trace:
+    def __init__(self, domain, size):
+        self.domain = domain
+        self.size = size
+        self.traceback = ()
+
+
 class Snapshot:
     def __init__(self, traces=None):
         self.traces = traces or []
 
     def filter_traces(self, filters):
-        return self
+        traces = self.traces
+        for f in filters:
+            if isinstance(f, DomainFilter):
+                if f.inclusive:
+                    traces = [t for t in traces if t.domain == f.domain]
+                else:
+                    traces = [t for t in traces if t.domain != f.domain]
+            # plain (filename) Filters: no traceback data under the bridge —
+            # keep the traces rather than dropping them all.
+        return Snapshot(list(traces))
 
     def statistics(self, key_type, cumulative=False):
         return []
@@ -34,29 +52,55 @@ class Snapshot:
         return []
 
 
-_tracing = False
+def _store():
+    from browser import window
+    st = getattr(window, "__wasthon_tracemalloc", None)
+    if st is None:
+        window.eval(
+            "globalThis.__wasthon_tracemalloc ="
+            " { tracing: false, map: new Map() }")
+        st = window.__wasthon_tracemalloc
+    return st
 
 
 def start(nframe=1):
-    global _tracing
-    _tracing = True
+    st = _store()
+    st.map.clear()
+    st.tracing = True
 
 
 def stop():
-    global _tracing
-    _tracing = False
+    st = _store()
+    st.tracing = False
+    st.map.clear()
 
 
 def is_tracing():
-    return _tracing
+    return bool(_store().tracing)
+
+
+def _traces():
+    from browser import window
+    st = _store()
+    out = []
+    entries = getattr(window.Array, "from")(st.map.entries())
+    for pair in entries:
+        key, size = pair[0], pair[1]
+        try:
+            domain = int(str(key).split(":")[0])
+        except ValueError:
+            continue
+        out.append(Trace(domain, int(size)))
+    return out
 
 
 def take_snapshot():
-    return Snapshot()
+    return Snapshot(_traces())
 
 
 def get_traced_memory():
-    return (0, 0)
+    total = sum(t.size for t in _traces())
+    return (total, total)
 
 
 def reset_peak():
@@ -68,4 +112,4 @@ def get_tracemalloc_memory():
 
 
 def clear_traces():
-    pass
+    _store().map.clear()
