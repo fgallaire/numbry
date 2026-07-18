@@ -17,11 +17,25 @@ class _Raises:
         self.expected = expected if isinstance(expected, tuple) else (expected,)
         self.match = match
         self.value = None
+        self._wcm = None
 
     def __enter__(self):
+        # pandas runs its suite under `filterwarnings = error`: an expected
+        # Warning class actually RAISES there (pytest.raises(FutureWarning)
+        # is idiomatic in its tests). Emulate for the classes asked for.
+        wcls = [c for c in self.expected
+                if isinstance(c, type) and issubclass(c, Warning)]
+        if wcls:
+            import warnings
+            self._wcm = warnings.catch_warnings()
+            self._wcm.__enter__()
+            for c in wcls:
+                warnings.simplefilter("error", category=c)
         return self
 
     def __exit__(self, et, ev, tb):
+        if self._wcm is not None:
+            self._wcm.__exit__(None, None, None)
         if et is None:
             raise AssertionError("DID NOT RAISE %r" % (self.expected,))
         if not issubclass(et, self.expected):
