@@ -20,6 +20,11 @@ MPL_TAG="v3.9.2"
 SEABORN_TAG="v0.13.2"
 PILLOW_TAG="11.0.0"     # python-pillow/Pillow (PNG-only C core, no libjpeg/etc.)
 KIWI_TAG="1.4.7"        # nucleic/kiwi (kiwisolver's home repo)
+SYMPY_PIN="1.14.0"      # torch requires sympy>=1.13.3; pulls mpmath (both pure Python)
+MPMATH_PIN="1.4.1"      # OVERRIDES sympy's mpmath<1.4 pin: 1.3.0's py2-era exec-templated
+                        # operators lose int_types under Brython (runtime NameError in the
+                        # torch opinfo/gradcheck paths); 1.4.1 is the py3 rewrite the local
+                        # dashboards were validated on
 PYBIND11_PIN="2.13.6"   # EXACTLY: mplbuild.sh's header seds are calibrated on it
 CYTHON_COMMIT="1fcb9f4c0cb0a67148f5bb4551cf10571cb7b569"   # fgallaire/cython fix-argsslice-fastcall (3.3 master + ArgsSlice fix) — scipy
 CYTHON30_TAG="3.0.11"   # upstream — numpy.random + pandas were validated against 3.0.11 output (3.3 crashes on pandas' fused types)
@@ -66,6 +71,11 @@ CY30="$W/cython30-src"; pin https://github.com/cython/cython.git "$CY30" "$CYTHO
 echo "=== pure-python runtime deps for the pandas VFS (dateutil/pytz/six) ==="
 DEPS="$W/pdeps"
 python3 -m pip install -q --target "$DEPS" python-dateutil pytz six
+
+echo "=== sympy + mpmath (pure Python, torch's symbolic-shapes dep + Jubryter) ==="
+SYMPYDEPS="$W/sympydeps"
+python3 -m pip install -q --target "$SYMPYDEPS" "sympy==$SYMPY_PIN"
+python3 -m pip install -q --target "$SYMPYDEPS" --upgrade "mpmath==$MPMATH_PIN"
 
 echo "=== matplotlib deps: VFS packages + pybind11/cppy headers ==="
 MPLDEPS="$W/mpldeps"
@@ -163,6 +173,7 @@ cp "$W/numpy-probe/numpy__config__stub.py" "$NP/numpy/__config__.py"
 node "$W/numpy-probe/gen_numpy_vfs.mjs" "$NP/numpy" "$W/build/numpy_vfs.js"
 node "$W/cython-support/gen_pandas_vfs.mjs" "$PD" "$DEPS" --tests
 node "$W/cython-support/gen_scipy_vfs.mjs" "$SC"
+node "$HERE/src/gen_sympy_vfs.mjs" "$SYMPYDEPS" "$W/build/sympy_vfs.js"
 
 echo "=== collect artifacts ==="
 mkdir -p "$HERE/build"
@@ -171,7 +182,7 @@ for f in numpy_multiarray_umath nprnd npnd npsp npfft npcl nppd npmpl npsb nppil
 done
 cp "$W"/build/numpy_vfs.js "$W"/build/pandas_vfs.js "$W"/build/scipy_ndimage_vfs.js \
    "$W"/build/scipy_special_vfs.js "$W"/build/scipy_fft_vfs.js "$W"/build/scipy_cluster_vfs.js \
-   "$W"/build/pil_vfs.js \
+   "$W"/build/pil_vfs.js "$W"/build/sympy_vfs.js \
    "$W"/build/dateutil_zoneinfo_data.js "$W"/build/mpl_vfs.js "$W"/build/sb_vfs.js "$HERE/build/"
 rm -rf "$HERE/loader/brython"
 cp -r "$W/loader/brython" "$HERE/loader/brython"

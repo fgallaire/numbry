@@ -1,7 +1,7 @@
 # NumBry
 
 **The scientific Python stack — real NumPy, pandas, SciPy, matplotlib,
-seaborn and Pillow — running in the browser**, on top of
+seaborn, Pillow and SymPy — running in the browser**, on top of
 [Brython](https://github.com/brython-dev/brython) through the
 [Wasthon](https://github.com/fgallaire/wasthon) C-API bridge.
 
@@ -24,6 +24,9 @@ Validated against the upstream projects' **own test suites**, run in-browser:
   ONE wasm module, with live `np.linalg` (cholesky/inv/det, pinv)
 - **Pillow 11.0.0** — the `_imaging` C core in wasm, PNG read/write via zlib:
   new/convert/resize/rotate/ImageDraw + pixel-exact PNG round-trip (19/19 smoke)
+- **SymPy 1.14.0** — pure Python (with mpmath), served as a Brython VFS loaded
+  on demand: `symbols`/`expand`/`diff` and the symbolic algebra core. Doubles
+  as torch's `symbolic_shapes` dependency for BryTorch's `torch._refs.*`
 
 ## Layout
 
@@ -34,12 +37,14 @@ Validated against the upstream projects' **own test suites**, run in-browser:
   matplotlib/seaborn/pillow VFS generators and the browser stubs. At build time these overlay the
   **generic** `cython-support/` layer that ships with Wasthon (compat headers,
   `cybuild.sh`, the Cython js-library).
+- `src/gen_sympy_vfs.mjs` — the SymPy VFS generator (pure Python, no compile
+  step, so it lives outside `cython-support/`).
 - `loader/` — the pages: suite dashboards (`test-*-all.html`), single-module
   runners and smoke tests, indexed by `index.html`.
 - `build.sh` — clones wasthon@main (bridge + Brython + generic support layer),
-  pins numpy/pandas/scipy/matplotlib/seaborn/Pillow/Cython to exact releases, builds
-  everything from source. **No committed blobs**: artifacts land in `build/`
-  (git-ignored).
+  pins numpy/pandas/scipy/matplotlib/seaborn/Pillow/SymPy/Cython to exact
+  releases, builds everything from source. **No committed blobs**: artifacts
+  land in `build/` (git-ignored).
 
 ## Build
 
