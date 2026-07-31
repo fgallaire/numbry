@@ -94,6 +94,14 @@ echo "=== compile the bridge (build/wasthon.o) ==="
 ( cd "$W" && source external/emsdk/emsdk_env.sh >/dev/null 2>&1 && mkdir -p build \
   && cp src/wasthon.c . && emcc -O3 -c -I . -I src wasthon.c -o build/wasthon.o && rm -f wasthon.c )
 
+# allocator state for this heap, so the dashboards can report numpy's used and
+# free the way they report torch's. torch gets it from brytorch's
+# wasthon_census.cpp, which needs torch and pybind11; mallinfo() needs neither,
+# so nprnd carries its own one-function copy.
+echo "=== compile the allocator probe (build/wasthon_mallinfo.o) ==="
+( cd "$HERE" && source "$W/external/emsdk/emsdk_env.sh" >/dev/null 2>&1 \
+  && emcc -O1 -c src/wasthon_mallinfo.c -o "$W/build/wasthon_mallinfo.o" )
+
 echo "=== numpy C core (codegen + ~90 objects) ==="
 bash "$W/numpy-probe/probe.sh" "$NP"
 echo "=== numpy.linalg (f2c'd lapack_lite, pure C) ==="
@@ -114,8 +122,8 @@ echo "=== relink the two dashboard modules WITH linalg ==="
   MODS="_common bit_generator _mt19937 _philox _pcg64 _sfc64 _bounded_integers _generator mtrand"
   CYO=""; for M in $MODS; do CYO="$CYO $NR/$M.o"; done
   ALGO="$NR/mt19937.o $NR/mt19937-jump.o $NR/philox.o $NR/pcg64.o $NR/sfc64.o $NR/legacy-distributions.o $NR/legacy_rand_shims.o"
-  EXP='["_PyInit__multiarray_umath","_PyInit__umath_linalg","_PyInit__common","_PyInit_bit_generator","_PyInit__mt19937","_PyInit__philox","_PyInit__pcg64","_PyInit__sfc64","_PyInit__bounded_integers","_PyInit__generator","_PyInit_mtrand","_wasthon_init","_wasthon_module_create","_malloc","_free","___errno_location","_fetestexcept","_feclearexcept","_feraiseexcept","_wasthon_set_errno_erange"]'
-  emcc -O1 "$OBJ"/*.o "$LA"/*.o "$NR/tanh_stub.o" $CYO $ALGO "$NR"/npyrandom/*.o "$W/build/wasthon.o" \
+  EXP='["_PyInit__multiarray_umath","_PyInit__umath_linalg","_PyInit__common","_PyInit_bit_generator","_PyInit__mt19937","_PyInit__philox","_PyInit__pcg64","_PyInit__sfc64","_PyInit__bounded_integers","_PyInit__generator","_PyInit_mtrand","_wasthon_init","_wasthon_module_create","_malloc","_free","___errno_location","_fetestexcept","_feclearexcept","_feraiseexcept","_wasthon_set_errno_erange","_wasthon_census_mallinfo"]'
+  emcc -O1 "$OBJ"/*.o "$LA"/*.o "$NR/tanh_stub.o" $CYO $ALGO "$NR"/npyrandom/*.o "$W/build/wasthon.o" "$W/build/wasthon_mallinfo.o" \
     --js-library "$SRC/wasthon.js" --js-library "$CS/cython_support.js" -Wl,--allow-multiple-definition \
     -s ALLOW_MEMORY_GROWTH=1 -s ALLOW_TABLE_GROWTH=1 \
     -sFORCE_FILESYSTEM=1 -s EXPORTED_RUNTIME_METHODS='["HEAP32","FS"]' \
