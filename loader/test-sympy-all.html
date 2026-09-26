@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>wasthon — sympy suite dashboard</title>
+<script>document.addEventListener('DOMContentLoaded',()=>{const d=new URLSearchParams(location.search).get('dash');if(d){const t=' '+d+'/2';document.title+=t;const h=document.querySelector('h1');if(h)h.textContent+=t;}});</script>
+<script src="./brython/brython.js"></script>
+<script src="./brython/brython_stdlib.js"></script>
+<script src="../build/sympy_vfs.js"></script>
+<script src="./wasthon-io-write.js"></script>
+<script src="./wasthon-fs.js"></script>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { padding: 6px 10px; text-align: right; border-bottom: 1px solid #ddd; }
+  th:first-child, td:first-child { text-align: left; }
+  th { background: #f4f4f4; }
+  tr.pending td { color: #999; }
+  tr.running td { color: #04a; }
+  tr.allpass  { background: #e8f6e8; }
+  tr.somefail { background: #fde8e8; }
+  tr.importfail { background: #fff4e0; }
+  td.num { font-variant-numeric: tabular-nums; }
+  .bar { display:inline-block; height:10px; background:#0a0; border-radius:2px; vertical-align:middle; }
+  .barbg { display:inline-block; height:10px; width:80px; background:#eee; border-radius:2px; vertical-align:middle; text-align:left; }
+  #summary { font-size: 1.1rem; margin-top: 1.5rem; font-weight: 600; }
+  code { background:#f0f0f0; padding:0 3px; border-radius:3px; }
+</style>
+</head>
+<body>
+<p style="font-size:0.85em;margin:0 0 1em 0;"><a href="index.html">← back to index</a></p>
+<h1>wasthon — sympy suite dashboard</h1>
+<p style="color:#666;font-size:0.9em;max-width:74ch;">
+  Runs sympy 1.14's own test modules. sympy is 100% pure Python, so this
+  measures Brython rather than the C bridge. brython + the VFS load
+  <b>once</b> and the modules run sequentially in one interpreter — no
+  per-module reload. The module list is read from the VFS, so it follows
+  whatever <code>gen_sympy_vfs.mjs</code> shipped. Per-module detail goes to the
+  browser console; the page shows the table.
+</p>
+
+<p id="stamp" style="color:#999;font-size:0.8em;margin:0 0 1em 0;"></p>
+<script>
+/* The VFS carries the timestamp gen_sympy_vfs.mjs wrote. Showing it turns
+   "the page looks stale" into a fact: a cached blob shows an old date. */
+document.addEventListener('DOMContentLoaded', () => {
+  /* update_VFS deletes $timestamp and copies it onto every entry instead. */
+  const ent = $B.VFS && ($B.VFS['sympy'] || $B.VFS['mpmath']);
+  const ts = (ent && ent.timestamp) ? new Date(ent.timestamp).toISOString().slice(0, 19).replace('T', ' ') : '?';
+  /* brython's version_info never moves when we patch it, so probe the vendored
+     fixes themselves: this line says which brython.js is really running. */
+  const probe = [
+    ['augm', "a = frozenset({1})\na |= {2}\nr = len(a) == 2"],
+    ['dict', "class P:\n    def __len__(self): return 2\n    def __getitem__(self, i): return i\nr = dict([P()]) == {0: 1}"],
+    ['lcm',  "import math\nr = math.lcm(4, 6) == 12"],
+  ].map(([name, src]) => {
+    try { $B.runPythonSource(src + "\nfrom browser import window\nwindow.__probe_r = r", 'probe_' + name);
+          return name + (globalThis.__probe_r ? ' ok' : ' KO'); }
+    catch (e) { return name + ' KO'; }
+  }).join(' · ');
+  document.getElementById('stamp').textContent = 'VFS ' + ts + '  ·  ' + probe;
+});
+</script>
+<table id="results">
+  <thead><tr>
+    <th>Module</th><th>ran</th><th>pass</th><th>fail</th><th>skip</th><th>pass rate</th><th>status</th>
+  </tr></thead>
+  <tbody></tbody>
+</table>
+<div id="summary">⏳ Running…</div>
+
+<script type="text/x-sympy-runner" id="runner">
+import sys as _sys, types as _types
+# CPython always has sys.modules['__main__']; this page runs each module under
+# a fabricated name, so anything in the stdlib that does `import __main__`
+# (pdb, bdb, profile, rlcompleter -- reached through several sympy import
+# chains) raised ModuleNotFoundError before the tests could start.
+if "__main__" not in _sys.modules:
+    _sys.modules["__main__"] = _types.ModuleType("__main__")
+
+# sympy ships its own test framework (sympy/testing/pytest.py). With pytest
+# absent it takes its fallback branch and defines Skipped / XFail / XPass
+# itself, so a runner only has to call the test functions and read those three
+# exceptions. Only 5 of sympy's 447 test files use fixtures or parametrize,
+# which is why this stays a fraction of the numpy dashboard's runner.
+
+# Whatever sympy's own runner resets between test files, this page resets too.
+# sympy/testing/runtests.py does exactly three things, and each one is a piece
+# of global state its tests mutate and do not restore:
+#   clear_cache()          before every file      (runtests.py:1416)
+#   random.seed(seed)      before every test      (runtests.py:1312)
+#   mpmath.mp.dps          5 modules raise it to 50 or 100, 2 restore it
+# Without them a module's time AND its results depend on what ran before it:
+# mpmath's test_summation went from 3.8 s alone to minutes behind another
+# module, and test_derivatives from 38 s to 1766 s at the end of a long list.
+_SEED = 0
+
+def _isolate():
+    try:
+        from sympy.core.cache import clear_cache
+        clear_cache()
+    except Exception:
+        pass
+    try:
+        import mpmath
+        mpmath.mp.dps = 15
+    except Exception:
+        pass
+
+
+def run_module(mod):
+    _isolate()
+    import random as _random
+    from sympy.testing.pytest import Skipped, XFail, XPass
+    passed = 0
+    fail = 0
+    skip = 0
+    msgs = []
+    for name in sorted(dir(mod)):
+        if not name.startswith("test_"):
+            continue
+        fn = getattr(mod, name, None)
+        if not callable(fn):
+            continue
+        # arguments mean pytest fixtures, which this runner does not provide:
+        # counted as skipped rather than reported as a defect of sympy
+        code = getattr(fn, "__code__", None)
+        if code is not None and code.co_argcount:
+            skip += 1
+            continue
+        try:
+            _random.seed(_SEED)
+            fn()
+            passed += 1
+        except Skipped:
+            skip += 1
+        except XFail:
+            # the test is marked @XFAIL and failed, which is the expectation
+            skip += 1
+        except XPass:
+            fail += 1
+            msgs.append(name + ": XPASS (marked XFAIL but passed)")
+        except BaseException as e:
+            fail += 1
+            msgs.append(name + ": " + type(e).__name__ + ": " + str(e)[:110])
+    return passed, fail, skip, msgs
+</script>
+
+<script>
+const params = new URLSearchParams(location.search);
+
+/* Modules left OUT: they import a third-party test dependency we do not ship.
+   hypothesis is a candidate (one compiled extension, 30 test modules across
+   torch/numpy/sympy/mpmath); pexpect drives a subprocess through a pty, and
+   test_cli tests a command line -- neither exists in a browser. */
+const EXCLUDED = new Set([
+  'sympy.polys.tests.test_hypothesis',    // hypothesis
+  'sympy.ntheory.tests.test_hypothesis',  // hypothesis
+]);
+
+
+/* The list is DISCOVERED from the VFS rather than written here: the page then
+   follows gen_sympy_vfs.mjs instead of drifting from it. A test module is a
+   VFS key whose last component starts with test_ and which sits under a
+   tests/ package. */
+const ALL_MODULES = Object.keys($B.VFS || {})
+  .filter(k => /^sympy\./.test(k))
+  .filter(k => {
+    const parts = k.split('.');
+    return parts.length > 2 && parts[parts.length - 1].startsWith('test_')
+           && parts[parts.length - 2] === 'tests';
+  })
+  .filter(k => !EXCLUDED.has(k))
+  .sort();
+
+/* Measured above 20 s in the browser. ?dash=2 runs these, ?dash=1 the rest.
+   The two longest go at the very end, test_query after test_derivatives. */
+const SLOW = [
+  'sympy.algebras.tests.test_quaternion',
+  'sympy.assumptions.tests.test_refine',
+  'sympy.assumptions.tests.test_query',
+  'sympy.combinatorics.tests.test_polyhedron',
+  'sympy.concrete.tests.test_sums_products',
+  'sympy.functions.combinatorial.tests.test_comb_numbers',
+  'sympy.functions.elementary.tests.test_trigonometric',
+  'sympy.integrals.tests.test_integrals',
+  'sympy.integrals.tests.test_manual',
+  'sympy.logic.tests.test_boolalg',
+  'sympy.matrices.tests.test_determinant',
+  'sympy.matrices.tests.test_matrixbase',
+  'sympy.ntheory.tests.test_primetest',
+  'sympy.physics.hep.tests.test_gamma_matrices',
+  'sympy.physics.mechanics.tests.test_joint',
+  'sympy.physics.quantum.tests.test_circuitutils',
+  'sympy.physics.quantum.tests.test_identitysearch',
+  'sympy.physics.quantum.tests.test_spin',
+  'sympy.physics.tests.test_secondquant',
+  'sympy.polys.tests.test_subresultants_qq_zz',
+  'sympy.solvers.tests.test_solveset',
+  'sympy.stats.tests.test_continuous_rv',
+  'sympy.tensor.array.expressions.tests.test_convert_array_to_matrix',
+  'sympy.tensor.tests.test_tensor',
+  'sympy.utilities.tests.test_pickling',
+  'sympy.utilities.tests.test_wester',
+  'sympy.matrices.expressions.tests.test_derivatives',
+];
+const LAST = ['sympy.matrices.expressions.tests.test_derivatives',
+              'sympy.assumptions.tests.test_query'];
+ALL_MODULES.sort((a, b) => LAST.indexOf(a) - LAST.indexOf(b));
+
+/* ?test=X is an EXACT module, the way the numpy dashboard links to one;
+   ?k=X stays a substring narrowing, so `k=test_eigen` deliberately also
+   matches test_eigen_symmetric. */
+const only = params.get('test');
+const kFilter = params.get('k');
+let MODULES = only ? ALL_MODULES.filter(m => m === only)
+            : kFilter ? ALL_MODULES.filter(m => m.includes(kFilter))
+            : ALL_MODULES;
+
+const dash = params.get('dash');
+if (dash === '1')      MODULES = MODULES.filter(m => !SLOW.includes(m));
+else if (dash === '2') MODULES = MODULES.filter(m =>  SLOW.includes(m));
+
+/* ?part=i&nparts=n — a CONTIGUOUS slice, like the brytorch dashboards: an
+   interleaved one cannot be compared across two values of n. ?dash=1..12 is
+   the same cut in twelfths, which is how the index links to it. */
+const part = parseInt(params.get('part') || '0', 10);
+const nparts = parseInt(params.get('nparts') || '0', 10);
+if (part && nparts) {
+  const per = Math.ceil(MODULES.length / nparts);
+  MODULES = MODULES.slice((part - 1) * per, part * per);
+}
+
+function shortName(m) { return m.split('.').slice(-1)[0] + ' · ' + m.split('.').slice(0,-1).slice(-2).join('.'); }
+const tbody = document.querySelector('#results tbody');
+for (const m of MODULES) {
+  const tr = document.createElement('tr');
+  tr.className = 'pending';
+  tr.innerHTML = '<td><a href="test-sympy-all.html?test=' + m + '" target="_blank">' + shortName(m) + '</a></td>' +
+    '<td class="num">—</td><td class="num">—</td><td class="num">—</td>' +
+    '<td class="num">—</td><td>—</td><td>⏳</td>';
+  tbody.appendChild(tr);
+}
+
+function setRow(i, cls, cells) {
+  const tr = tbody.children[i];
+  if (!tr) return;
+  tr.className = cls;
+  const tds = tr.children;
+  for (let j = 0; j < cells.length; j++) tds[j + 1].innerHTML = String(cells[j]);
+}
+
+(async () => {
+  const runnerSrc = document.getElementById('runner').textContent;
+  const breathe = () => new Promise(r => setTimeout(r, 60));
+  let totRan = 0, totPass = 0, totFail = 0, totSkip = 0;
+  let modsOK = 0, modsRun = 0, importFails = 0;
+
+  for (let i = 0; i < MODULES.length; i++) {
+    const mod = MODULES[i];
+    setRow(i, 'running', ['…', '…', '…', '…', '…', '🔄']);
+    await breathe();
+    const driver = runnerSrc +
+      "\n\ntry:" +
+      "\n    _mod = __import__(" + JSON.stringify(mod) + ", fromlist=[\"_\"])" +
+      "\nexcept BaseException as _e:" +
+      "\n    print(\"IMPORT FAILED: \" + type(_e).__name__ + \": \" + str(_e)[:150])" +
+      "\nelse:" +
+      "\n    _p, _f, _s, _fails = run_module(_mod)" +
+      "\n    print(\"ran=\" + str(_p + _f + _s))" +
+      "\n    print(\"passed=\" + str(_p))" +
+      "\n    print(\"failed=\" + str(_f))" +
+      "\n    print(\"skipped=\" + str(_s))" +
+      "\n    for _m in _fails[:12]:" +
+      "\n        print(\"  FAIL \" + _m)" +
+      "\n";
+    let buf = '';
+    const t0 = performance.now();
+    const oc = console.log;
+    console.log = (...a) => { buf += a.map(x => typeof x === 'string' ? x : String(x)).join(' ') + '\n'; };
+    try { $B.runPythonSource(driver, 'sympy_one_' + mod.replace(/\./g, '_')); }
+    catch (e) { buf += '\nMODULE CRASH: ' + (e && (e.args ? String(e.args[0]) : e.message || e)); }
+    finally { console.log = oc; }
+    const secs = ((performance.now() - t0) / 1000).toFixed(1);
+    console.log('=== module: ' + mod + ' ===\n' + buf + '(' + secs + ' s)');
+
+    const g = re => { const m = buf.match(re); return m ? parseInt(m[1], 10) : null; };
+    const imp = buf.match(/IMPORT FAILED:\s*(.+)/);
+    if (imp) {
+      importFails++;
+      setRow(i, 'importfail', ['—', '—', '—', '—', '—', '⚠ ' + imp[1].trim().slice(0, 120)]);
+    } else {
+      const ran = g(/ran\s*=\s*(\d+)/) || 0, passed = g(/passed\s*=\s*(\d+)/) || 0;
+      const fail = g(/failed\s*=\s*(\d+)/) || 0, skipped = g(/skipped\s*=\s*(\d+)/) || 0;
+      modsRun++;
+      const allpass = fail === 0 && ran > 0;
+      if (allpass) modsOK++;
+      totRan += ran; totPass += passed; totFail += fail; totSkip += skipped;
+      const rn = passed + fail, rate = rn ? Math.round(100 * passed / rn) : 100;
+      const bar = '<span class="barbg"><span class="bar" style="width:' +
+                  Math.round(0.8 * rate) + 'px"></span></span> ' + rate + '%';
+      setRow(i, allpass ? 'allpass' : 'somefail',
+             [ran, passed, fail, skipped, bar, allpass ? '✓ ' + secs + 's' : '✗ ' + secs + 's']);
+    }
+    const rn = totPass + totFail;
+    document.getElementById('summary').innerHTML =
+      '<b>' + modsOK + '/' + modsRun + '</b> modules fully green &nbsp;|&nbsp; assertions: ' +
+      '<b>' + totPass + '/' + rn + '</b> pass (' + (rn ? Math.round(100 * totPass / rn) : 100) + '%), ' +
+      totFail + ' fail, ' + totSkip + ' skip' +
+      (importFails ? ' &nbsp;|&nbsp; ' + importFails + ' import-failed' : '') +
+      (i + 1 < MODULES.length ? ' &nbsp;·&nbsp; running…' : '');
+  }
+  globalThis.__ALL_DONE__ = true;
+})();
+</script>
+</body>
+</html>

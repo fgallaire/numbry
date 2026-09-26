@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>wasthon — mpmath suite dashboard</title>
+<script>document.addEventListener('DOMContentLoaded',()=>{const d=new URLSearchParams(location.search).get('dash');if(d){const t=' '+d+'/2';document.title+=t;const h=document.querySelector('h1');if(h)h.textContent+=t;}});</script>
+<script src="./brython/brython.js"></script>
+<script src="./brython/brython_stdlib.js"></script>
+<script src="../build/sympy_vfs.js"></script>
+<script src="./wasthon-io-write.js"></script>
+<script src="./wasthon-fs.js"></script>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { padding: 6px 10px; text-align: right; border-bottom: 1px solid #ddd; }
+  th:first-child, td:first-child { text-align: left; }
+  th { background: #f4f4f4; }
+  tr.pending td { color: #999; }
+  tr.running td { color: #04a; }
+  tr.allpass  { background: #e8f6e8; }
+  tr.somefail { background: #fde8e8; }
+  tr.importfail { background: #fff4e0; }
+  td.num { font-variant-numeric: tabular-nums; }
+  .bar { display:inline-block; height:10px; background:#0a0; border-radius:2px; vertical-align:middle; }
+  .barbg { display:inline-block; height:10px; width:80px; background:#eee; border-radius:2px; vertical-align:middle; text-align:left; }
+  #summary { font-size: 1.1rem; margin-top: 1.5rem; font-weight: 600; }
+  code { background:#f0f0f0; padding:0 3px; border-radius:3px; }
+</style>
+</head>
+<body>
+<p style="font-size:0.85em;margin:0 0 1em 0;"><a href="index.html">← back to index</a></p>
+<h1>wasthon — mpmath suite dashboard</h1>
+<p style="color:#666;font-size:0.9em;max-width:74ch;">
+  Runs mpmath 1.4.1's own test modules. mpmath is 100% pure Python, so this
+  measures Brython rather than the C bridge -- and it is where the
+  <code>mpmath==1.4.1</code> pin came from: 1.3's py2-era <code>exec</code>-templated
+  operators lose <code>int_types</code> under Brython. brython + the VFS load
+  <b>once</b> and the modules run sequentially in one interpreter — no
+  per-module reload. The module list is read from the VFS, so it follows
+  whatever <code>gen_sympy_vfs.mjs</code> shipped. Per-module detail goes to the
+  browser console; the page shows the table.
+</p>
+
+<p id="stamp" style="color:#999;font-size:0.8em;margin:0 0 1em 0;"></p>
+<script>
+/* The VFS carries the timestamp gen_sympy_vfs.mjs wrote. Showing it turns
+   "the page looks stale" into a fact: a cached blob shows an old date. */
+document.addEventListener('DOMContentLoaded', () => {
+  /* update_VFS deletes $timestamp and copies it onto every entry instead. */
+  const ent = $B.VFS && ($B.VFS['sympy'] || $B.VFS['mpmath']);
+  const ts = (ent && ent.timestamp) ? new Date(ent.timestamp).toISOString().slice(0, 19).replace('T', ' ') : '?';
+  /* brython's version_info never moves when we patch it, so probe the vendored
+     fixes themselves: this line says which brython.js is really running. */
+  const probe = [
+    ['augm', "a = frozenset({1})\na |= {2}\nr = len(a) == 2"],
+    ['dict', "class P:\n    def __len__(self): return 2\n    def __getitem__(self, i): return i\nr = dict([P()]) == {0: 1}"],
+    ['lcm',  "import math\nr = math.lcm(4, 6) == 12"],
+  ].map(([name, src]) => {
+    try { $B.runPythonSource(src + "\nfrom browser import window\nwindow.__probe_r = r", 'probe_' + name);
+          return name + (globalThis.__probe_r ? ' ok' : ' KO'); }
+    catch (e) { return name + ' KO'; }
+  }).join(' · ');
+  document.getElementById('stamp').textContent = 'VFS ' + ts + '  ·  ' + probe;
+});
+</script>
+<table id="results">
+  <thead><tr>
+    <th>Module</th><th>ran</th><th>pass</th><th>fail</th><th>skip</th><th>pass rate</th><th>status</th>
+  </tr></thead>
+  <tbody></tbody>
+</table>
+<div id="summary">⏳ Running…</div>
+
+<script type="text/x-mpmath-runner" id="runner">
+import sys as _sys, types as _types
+# CPython always has sys.modules['__main__']; this page runs each module under
+# a fabricated name, so anything in the stdlib that does `import __main__`
+# (pdb, bdb, profile, rlcompleter -- reached through several sympy import
+# chains) raised ModuleNotFoundError before the tests could start.
+if "__main__" not in _sys.modules:
+    _sys.modules["__main__"] = _types.ModuleType("__main__")
+
+# mpmath's tests are plain module-level functions with no framework of their
+# own: no fixtures, no parametrize, no skip marker. Nothing here imports sympy
+# -- mpmath is sympy's dependency, not the other way round, and pulling sympy
+# in just to reach its Skipped class made every module of this page fail.
+
+def run_module(mod):
+    # mpmath.mp is GLOBAL mutable state and the tests raise its precision, then
+    # restore it with `mp.dps = 15` on the way out. A test that fails first
+    # never reaches its restore, so every later module computes at 50, 100 or
+    # 300 digits instead of 15: test_summation takes 3.8 s alone and minutes
+    # after test_gammazeta. Reset it so a module's time is its own.
+    try:
+        from mpmath import mp
+        mp.dps = 15
+    except Exception:
+        pass
+    passed = 0
+    fail = 0
+    skip = 0
+    msgs = []
+    for name in sorted(dir(mod)):
+        if not name.startswith("test_"):
+            continue
+        fn = getattr(mod, name, None)
+        if not callable(fn):
+            continue
+        code = getattr(fn, "__code__", None)
+        if code is not None and code.co_argcount:
+            skip += 1
+            continue
+        try:
+            fn()
+            passed += 1
+        except BaseException as e:
+            fail += 1
+            msgs.append(name + ": " + type(e).__name__ + ": " + str(e)[:110])
+    return passed, fail, skip, msgs
+</script>
+
+<script>
+const params = new URLSearchParams(location.search);
+
+/* Modules left OUT: they import a third-party test dependency we do not ship.
+   hypothesis is a candidate (one compiled extension, 30 test modules across
+   torch/numpy/sympy/mpmath); pexpect drives a subprocess through a pty, and
+   test_cli tests a command line -- neither exists in a browser. */
+const EXCLUDED = new Set([
+  'mpmath.tests.test_basic_ops',   // hypothesis
+  'mpmath.tests.test_format',      // hypothesis
+  'mpmath.tests.test_cli',         // pexpect
+  'mpmath.tests.test_demos',       // pexpect
+]);
+
+
+/* The list is DISCOVERED from the VFS rather than written here: the page then
+   follows gen_sympy_vfs.mjs instead of drifting from it. A test module is a
+   VFS key whose last component starts with test_ and which sits under a
+   tests/ package. */
+const ALL_MODULES = Object.keys($B.VFS || {})
+  .filter(k => /^mpmath\./.test(k))
+  .filter(k => {
+    const parts = k.split('.');
+    return parts.length > 2 && parts[parts.length - 1].startsWith('test_')
+           && parts[parts.length - 2] === 'tests';
+  })
+  .filter(k => !EXCLUDED.has(k))
+  .sort();
+
+/* The slow ones go last, so the page fills in before they start:
+   test_calculus alone ran 160 s. */
+const LAST = ['mpmath.tests.test_calculus',
+              'mpmath.tests.test_functions', 'mpmath.tests.test_functions2',
+              'mpmath.tests.test_quad', 'mpmath.tests.test_convert'];
+ALL_MODULES.sort((a, b) => LAST.indexOf(a) - LAST.indexOf(b));
+
+/* ?test=X is an EXACT module, the way the numpy dashboard links to one;
+   ?k=X stays a substring narrowing, so `k=test_eigen` deliberately also
+   matches test_eigen_symmetric. */
+const only = params.get('test');
+const kFilter = params.get('k');
+let MODULES = only ? ALL_MODULES.filter(m => m === only)
+            : kFilter ? ALL_MODULES.filter(m => m.includes(kFilter))
+            : ALL_MODULES;
+
+/* ?dash=2 holds the modules that need several minutes each; 1 holds the rest.
+   LAST above only orders, SLOW here splits: test_calculus is ordered last but
+   stays on 1, its 160 s being the most a page can carry without hurting. */
+const SLOW = ['mpmath.tests.test_quad', 'mpmath.tests.test_convert'];
+const dash = params.get('dash');
+if (dash === '1')      MODULES = MODULES.filter(m => !SLOW.includes(m));
+else if (dash === '2') MODULES = MODULES.filter(m =>  SLOW.includes(m));
+
+/* ?part=i&nparts=n — a CONTIGUOUS slice, like the brytorch dashboards: an
+   interleaved one cannot be compared across two values of n. */
+const part = parseInt(params.get('part') || '0', 10);
+const nparts = parseInt(params.get('nparts') || '0', 10);
+if (part && nparts) {
+  const per = Math.ceil(MODULES.length / nparts);
+  MODULES = MODULES.slice((part - 1) * per, part * per);
+}
+
+function shortName(m) { return m.split('.').slice(-1)[0] + ' · ' + m.split('.').slice(0,-1).slice(-2).join('.'); }
+const tbody = document.querySelector('#results tbody');
+for (const m of MODULES) {
+  const tr = document.createElement('tr');
+  tr.className = 'pending';
+  tr.innerHTML = '<td><a href="test-mpmath-all.html?test=' + m + '" target="_blank">' + shortName(m) + '</a></td>' +
+    '<td class="num">—</td><td class="num">—</td><td class="num">—</td>' +
+    '<td class="num">—</td><td>—</td><td>⏳</td>';
+  tbody.appendChild(tr);
+}
+
+function setRow(i, cls, cells) {
+  const tr = tbody.children[i];
+  if (!tr) return;
+  tr.className = cls;
+  const tds = tr.children;
+  for (let j = 0; j < cells.length; j++) tds[j + 1].innerHTML = String(cells[j]);
+}
+
+(async () => {
+  const runnerSrc = document.getElementById('runner').textContent;
+  const breathe = () => new Promise(r => setTimeout(r, 60));
+  let totRan = 0, totPass = 0, totFail = 0, totSkip = 0;
+  let modsOK = 0, modsRun = 0, importFails = 0;
+
+  for (let i = 0; i < MODULES.length; i++) {
+    const mod = MODULES[i];
+    setRow(i, 'running', ['…', '…', '…', '…', '…', '🔄']);
+    await breathe();
+    const driver = runnerSrc +
+      "\n\ntry:" +
+      "\n    _mod = __import__(" + JSON.stringify(mod) + ", fromlist=[\"_\"])" +
+      "\nexcept BaseException as _e:" +
+      "\n    print(\"IMPORT FAILED: \" + type(_e).__name__ + \": \" + str(_e)[:150])" +
+      "\nelse:" +
+      "\n    _p, _f, _s, _fails = run_module(_mod)" +
+      "\n    print(\"ran=\" + str(_p + _f + _s))" +
+      "\n    print(\"passed=\" + str(_p))" +
+      "\n    print(\"failed=\" + str(_f))" +
+      "\n    print(\"skipped=\" + str(_s))" +
+      "\n    for _m in _fails[:12]:" +
+      "\n        print(\"  FAIL \" + _m)" +
+      "\n";
+    let buf = '';
+    const t0 = performance.now();
+    const oc = console.log;
+    console.log = (...a) => { buf += a.map(x => typeof x === 'string' ? x : String(x)).join(' ') + '\n'; };
+    try { $B.runPythonSource(driver, 'mpmath_one_' + mod.replace(/\./g, '_')); }
+    catch (e) { buf += '\nMODULE CRASH: ' + (e && (e.args ? String(e.args[0]) : e.message || e)); }
+    finally { console.log = oc; }
+    const secs = ((performance.now() - t0) / 1000).toFixed(1);
+    console.log('=== module: ' + mod + ' ===\n' + buf + '(' + secs + ' s)');
+
+    const g = re => { const m = buf.match(re); return m ? parseInt(m[1], 10) : null; };
+    const imp = buf.match(/IMPORT FAILED:\s*(.+)/);
+    if (imp) {
+      importFails++;
+      setRow(i, 'importfail', ['—', '—', '—', '—', '—', '⚠ ' + imp[1].trim().slice(0, 120)]);
+    } else {
+      const ran = g(/ran\s*=\s*(\d+)/) || 0, passed = g(/passed\s*=\s*(\d+)/) || 0;
+      const fail = g(/failed\s*=\s*(\d+)/) || 0, skipped = g(/skipped\s*=\s*(\d+)/) || 0;
+      modsRun++;
+      const allpass = fail === 0 && ran > 0;
+      if (allpass) modsOK++;
+      totRan += ran; totPass += passed; totFail += fail; totSkip += skipped;
+      const rn = passed + fail, rate = rn ? Math.round(100 * passed / rn) : 100;
+      const bar = '<span class="barbg"><span class="bar" style="width:' +
+                  Math.round(0.8 * rate) + 'px"></span></span> ' + rate + '%';
+      setRow(i, allpass ? 'allpass' : 'somefail',
+             [ran, passed, fail, skipped, bar, allpass ? '✓ ' + secs + 's' : '✗ ' + secs + 's']);
+    }
+    const rn = totPass + totFail;
+    document.getElementById('summary').innerHTML =
+      '<b>' + modsOK + '/' + modsRun + '</b> modules fully green &nbsp;|&nbsp; assertions: ' +
+      '<b>' + totPass + '/' + rn + '</b> pass (' + (rn ? Math.round(100 * totPass / rn) : 100) + '%), ' +
+      totFail + ' fail, ' + totSkip + ' skip' +
+      (importFails ? ' &nbsp;|&nbsp; ' + importFails + ' import-failed' : '') +
+      (i + 1 < MODULES.length ? ' &nbsp;·&nbsp; running…' : '');
+  }
+  globalThis.__ALL_DONE__ = true;
+})();
+</script>
+</body>
+</html>

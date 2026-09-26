@@ -18,19 +18,34 @@ class _SimpleCData:
 
 
 class c_void_p(_SimpleCData):
-    pass
+    _size_ = 4
 
 
 class c_uint32(_SimpleCData):
-    pass
+    _size_ = 4
 
 
 class c_uint64(_SimpleCData):
-    pass
+    _size_ = 8
 
 
 class c_double(_SimpleCData):
-    pass
+    _size_ = 8
+
+
+class c_long(_SimpleCData):
+    _size_ = 4
+
+
+class c_int(_SimpleCData):
+    _size_ = 4
+
+
+def sizeof(t):
+    # sympy.external.gmpy asks for sizeof(c_long) to decide its integer
+    # width; wasm32 answers 4, like the emscripten target the rest of the
+    # VFS is built for.
+    return t._size_
 
 
 class _CFuncPtr:

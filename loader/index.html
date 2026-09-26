@@ -31,6 +31,10 @@
   <li><a href="test-numpy-all.html"><strong>▶ numpy suite dashboard</strong></a> — modules from <code>numpy 2.5.1</code>'s own suite (<code>numpy/**/tests</code>) against the C core + numpy.random wasm. Single module: <code>test-numpy.html?test=…</code>.</li>
   <li><a href="test-scipy-all.html"><strong>▶ scipy suite dashboard</strong></a> — <code>SciPy 1.14.1</code>'s own tests for the three Fortran-free subpackages: <code>ndimage</code> (<code>_nd_image</code>/<code>_ni_label</code>), <code>special</code> (cephes/xsf/Boost.Math, <code>dstevr</code> on <code>lapack_lite</code>), <code>fft</code> (<code>pypocketfft</code>/pybind11). Single module: <code>test-scipy{,-special,-fft}.html?test=…</code>.</li>
   <li><a href="test-pandas-all.html"><strong>▶ pandas suite dashboard</strong></a> — <code>pandas 2.2.3</code>'s own <code>pandas/tests/tslibs</code> + <code>libs</code> against the 43 compiled <code>pandas._libs</code> wasm modules. Single module: <code>test-pandas-mod.html?test=…</code>.</li>
+  <li><a href="test-sympy-all.html?dash=1"><strong>▶ sympy suite dashboard 1/2</strong></a> — <code>SymPy 1.14</code>'s own tests, pure Python against Brython: the 583 quick modules.</li>
+  <li><a href="test-sympy-all.html?dash=2"><strong>▶ sympy suite dashboard 2/2</strong></a> — the 27 measured above 20 s, <code>test_derivatives</code> then <code>test_query</code> last.</li>
+  <li><a href="test-mpmath-all.html?dash=1"><strong>▶ mpmath suite dashboard 1/2</strong></a> — <code>mpmath 1.4.1</code>'s own tests, sympy's arbitrary-precision backend: the 32 quicker modules, <code>calculus</code> then <code>functions</code> last.</li>
+  <li><a href="test-mpmath-all.html?dash=2"><strong>▶ mpmath suite dashboard 2/2</strong></a> — the 2 longest (<code>quad</code>, <code>convert</code>).</li>
 </ul>
 
 <h2>Smoke pages</h2>
