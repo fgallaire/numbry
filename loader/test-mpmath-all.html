@@ -3,7 +3,6 @@
 <head>
 <meta charset="utf-8">
 <title>NumBry — mpmath suite dashboard</title>
-<script>document.addEventListener('DOMContentLoaded',()=>{const d=new URLSearchParams(location.search).get('dash');if(d){const t=' '+d+'/2';document.title+=t;const h=document.querySelector('h1');if(h)h.textContent+=t;}});</script>
 <script src="./brython/brython.js"></script>
 <script src="./brython/brython_stdlib.js"></script>
 <script src="../build/sympy_vfs.js"></script>
@@ -168,14 +167,6 @@ const kFilter = params.get('k');
 let MODULES = only ? ALL_MODULES.filter(m => m === only)
             : kFilter ? ALL_MODULES.filter(m => m.includes(kFilter))
             : ALL_MODULES;
-
-/* ?dash=2 holds the modules that need several minutes each; 1 holds the rest.
-   LAST above only orders, SLOW here splits: test_calculus is ordered last but
-   stays on 1, its 160 s being the most a page can carry without hurting. */
-const SLOW = ['mpmath.tests.test_convert'];
-const dash = params.get('dash');
-if (dash === '1')      MODULES = MODULES.filter(m => !SLOW.includes(m));
-else if (dash === '2') MODULES = MODULES.filter(m =>  SLOW.includes(m));
 
 /* ?part=i&nparts=n — a CONTIGUOUS slice, like the brytorch dashboards: an
    interleaved one cannot be compared across two values of n. */
