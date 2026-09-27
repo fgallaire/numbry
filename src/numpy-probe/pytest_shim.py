@@ -169,6 +169,9 @@ class _Mark:
         def deco(obj):
             obj._pytest_xfail = True
             return obj
+        # bare @pytest.mark.xfail: the test itself is the argument
+        if len(a) == 1 and callable(a[0]) and not k:
+            return deco(a[0])
         return deco
 
     def __getattr__(self, name):
