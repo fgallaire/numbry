@@ -81,6 +81,7 @@ echo "=== sympy + mpmath (pure Python, torch's symbolic-shapes dep + Jubryter) =
 SYMPYDEPS="$W/sympydeps"
 python3 -m pip install -q --target "$SYMPYDEPS" "sympy==$SYMPY_PIN"
 python3 -m pip install -q --target "$SYMPYDEPS" --upgrade "mpmath==$MPMATH_PIN"
+python3 -m pip install -q --target "$SYMPYDEPS" packaging==26.2
 
 echo "=== matplotlib deps: VFS packages + pybind11/cppy headers ==="
 MPLDEPS="$W/mpldeps"

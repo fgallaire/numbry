@@ -56,6 +56,9 @@ function walk(dir, prefix) {
 
 walk(path.join(SRC, 'sympy'), 'sympy');
 walk(path.join(SRC, 'mpmath'), 'mpmath');
+// packaging: mpmath's test_convert.test_compatibility imports packaging.version
+// before its importorskip("numpy")
+walk(path.join(SRC, 'packaging'), 'packaging');
 
 // Two stdlib gaps sympy walks into under Brython, both already written for the
 // numpy VFS and reused here rather than copied: ctypes (sympy.external.gmpy
