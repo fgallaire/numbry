@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+#
+# Copyright (C) 2026 Florent Gallaire <fgallaire@gmail.com>
+#
+# BSD 3-Clause License
+#
 # NumBry — build the numpy/pandas/scipy WASM artifacts. These are NEVER
 # committed: they are produced here (locally or in CI) from source.
 #

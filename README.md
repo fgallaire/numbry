@@ -61,4 +61,5 @@ GitHub Pages.
 
 Copyright (C) 2026 Florent Gallaire <fgallaire@gmail.com>
 
-BSD 3-Clause License — same as Brython. See `LICENSE` for the full text.
+BSD 3-Clause License — same as Brython. See `LICENSE` for the full text and
+`THIRD_PARTY.md` for the upstream components and their licenses.
