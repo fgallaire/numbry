@@ -205,9 +205,7 @@ ls $OUT/*.o 2>/dev/null | wc -l
 if [ -n "$FAILED" ]; then echo "compile failures — not linking"; exit 1; fi
 CPY="$ROOT/external/Python-3.14.6"
 # The C _datetime module + its real datetime.h come from the CPython 3.14.6
-# source. wasthon's build.sh downloads it too, but only when it builds
-# wasthon-full — a LATER phase than this one — so pdbuild fetches it here if
-# absent (idempotent: a present tree, e.g. a prior wasthon-full build, is reused).
+# source, fetched here if absent (idempotent: a present tree is reused).
 if [ ! -f "$CPY/Include/datetime.h" ]; then
   echo "=== fetching Python-3.14.6 source (for the C _datetime module) ==="
   mkdir -p "$CPY"; _dttmp="$(mktemp)"
