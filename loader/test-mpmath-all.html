@@ -79,10 +79,12 @@ import sys as _sys, types as _types
 if "__main__" not in _sys.modules:
     _sys.modules["__main__"] = _types.ModuleType("__main__")
 
-# mpmath's tests are plain module-level functions: no parametrize, no skip
-# marker, and one fixture, below. Nothing here imports sympy -- mpmath is
-# sympy's dependency, not the other way round, and pulling sympy in just to
-# reach its Skipped class made every module of this page fail.
+# mpmath's tests are module-level functions. Their pytest marks reach the
+# runner through the pytest shim: skip/skipif (_pytest_skip), xfail
+# (_pytest_xfail) and parametrize (_pytest_params); capsys is the one fixture
+# they take, besides the autouse one below. Nothing here imports sympy --
+# mpmath is sympy's dependency, not the other way round, and pulling sympy in
+# just to reach its Skipped class made every module of this page fail.
 
 def _reset_mp_globals():
     # mpmath's conftest.py (at its repo root, so not in the wheel this VFS is
@@ -98,7 +100,44 @@ def _reset_mp_globals():
     iv.prec = mp.prec
     iv.pretty = False
 
-from pytest import Skipped   # pytest.skip / importorskip
+from pytest import Skipped, XFailed   # pytest.skip / importorskip / xfail
+
+def _expand_params(params):
+    # stacked @pytest.mark.parametrize -> the list of kwargs dicts, one per
+    # case, as in the numpy dashboard's runner
+    if not params:
+        return [{}]
+    result = [{}]
+    for argnames, argvalues in reversed(params):
+        names = [n.strip() for n in (argnames.split(",") if isinstance(argnames, str) else argnames)]
+        factor = []
+        for v in argvalues:
+            if len(names) == 1:
+                factor.append({names[0]: v})
+            else:
+                factor.append(dict(zip(names, v)))
+        new = []
+        for base in result:
+            for f in factor:
+                d = dict(base); d.update(f); new.append(d)
+        result = new
+    return result
+
+class _Capsys:
+    # pytest's capsys, minimally: readouterr() returns what the test printed
+    # since the previous call
+    def __init__(self):
+        import io
+        self._saved = _sys.stdout, _sys.stderr
+        self._out, self._err = io.StringIO(), io.StringIO()
+        _sys.stdout, _sys.stderr = self._out, self._err
+    def readouterr(self):
+        res = _types.SimpleNamespace(out=self._out.getvalue(), err=self._err.getvalue())
+        for f in (self._out, self._err):
+            f.seek(0); f.truncate()
+        return res
+    def close(self):
+        _sys.stdout, _sys.stderr = self._saved
 
 def run_module(mod):
     passed = 0
@@ -111,19 +150,41 @@ def run_module(mod):
         fn = getattr(mod, name, None)
         if not callable(fn):
             continue
-        code = getattr(fn, "__code__", None)
-        if code is not None and code.co_argcount:
+        if getattr(fn, "_pytest_skip", False):
             skip += 1
             continue
-        try:
-            _reset_mp_globals()
-            fn()
-            passed += 1
-        except Skipped:
-            skip += 1
-        except BaseException as e:
-            fail += 1
-            msgs.append(name + ": " + type(e).__name__ + ": " + str(e)[:110])
+        # mpmath's pyproject.toml sets xfail_strict: an xfail test that
+        # passes is a failure
+        xfail = getattr(fn, "_pytest_xfail", False)
+        code = getattr(fn, "__code__", None)
+        cases = _expand_params(getattr(fn, "_pytest_params", None))
+        for i, kwargs in enumerate(cases):
+            label = name if len(cases) == 1 else name + "[" + str(i) + "]"
+            capsys = None
+            try:
+                _reset_mp_globals()
+                if code is not None and "capsys" in code.co_varnames[:code.co_argcount]:
+                    capsys = kwargs["capsys"] = _Capsys()
+                # an argument left unresolved raises TypeError here and the
+                # test fails, as pytest's "fixture not found" does
+                fn(**kwargs)
+            except (Skipped, XFailed):
+                skip += 1
+            except BaseException as e:
+                if xfail:
+                    skip += 1
+                else:
+                    fail += 1
+                    msgs.append(label + ": " + type(e).__name__ + ": " + str(e)[:110])
+            else:
+                if xfail:
+                    fail += 1
+                    msgs.append(label + ": XPASS(strict)")
+                else:
+                    passed += 1
+            finally:
+                if capsys is not None:
+                    capsys.close()
     return passed, fail, skip, msgs
 </script>
 
@@ -160,7 +221,8 @@ const ALL_MODULES = Object.keys($B.VFS || {})
    test_calculus alone ran 160 s. */
 const LAST = ['mpmath.tests.test_calculus',
               'mpmath.tests.test_functions', 'mpmath.tests.test_functions2',
-              'mpmath.tests.test_quad', 'mpmath.tests.test_convert'];
+              'mpmath.tests.test_quad', 'mpmath.tests.test_convert',
+              'mpmath.tests.test_extra_zeta', 'mpmath.tests.test_torture'];
 ALL_MODULES.sort((a, b) => LAST.indexOf(a) - LAST.indexOf(b));
 
 /* ?test=X is an EXACT module, the way the numpy dashboard links to one;
