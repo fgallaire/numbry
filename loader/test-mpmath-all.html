@@ -98,6 +98,8 @@ def _reset_mp_globals():
     iv.prec = mp.prec
     iv.pretty = False
 
+from pytest import Skipped   # pytest.skip / importorskip
+
 def run_module(mod):
     passed = 0
     fail = 0
@@ -117,6 +119,8 @@ def run_module(mod):
             _reset_mp_globals()
             fn()
             passed += 1
+        except Skipped:
+            skip += 1
         except BaseException as e:
             fail += 1
             msgs.append(name + ": " + type(e).__name__ + ": " + str(e)[:110])
