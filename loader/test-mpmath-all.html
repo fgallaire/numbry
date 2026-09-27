@@ -80,22 +80,26 @@ import sys as _sys, types as _types
 if "__main__" not in _sys.modules:
     _sys.modules["__main__"] = _types.ModuleType("__main__")
 
-# mpmath's tests are plain module-level functions with no framework of their
-# own: no fixtures, no parametrize, no skip marker. Nothing here imports sympy
-# -- mpmath is sympy's dependency, not the other way round, and pulling sympy
-# in just to reach its Skipped class made every module of this page fail.
+# mpmath's tests are plain module-level functions: no parametrize, no skip
+# marker, and one fixture, below. Nothing here imports sympy -- mpmath is
+# sympy's dependency, not the other way round, and pulling sympy in just to
+# reach its Skipped class made every module of this page fail.
+
+def _reset_mp_globals():
+    # mpmath's conftest.py (at its repo root, so not in the wheel this VFS is
+    # built from) resets its global state before EVERY test, as an autouse
+    # fixture; this is that fixture. Without it a test runs at whatever
+    # precision the previous one left: test_basic_integrals leaves 100 digits,
+    # and test_double_7 then evaluates 15 million points instead of 114 000.
+    from mpmath import mp, iv
+    mp.prec = _sys.float_info.mant_dig
+    mp.pretty = False
+    mp.rounding = 'n'
+    mp.pretty_dps = "str"
+    iv.prec = mp.prec
+    iv.pretty = False
 
 def run_module(mod):
-    # mpmath.mp is GLOBAL mutable state and the tests raise its precision, then
-    # restore it with `mp.dps = 15` on the way out. A test that fails first
-    # never reaches its restore, so every later module computes at 50, 100 or
-    # 300 digits instead of 15: test_summation takes 3.8 s alone and minutes
-    # after test_gammazeta. Reset it so a module's time is its own.
-    try:
-        from mpmath import mp
-        mp.dps = 15
-    except Exception:
-        pass
     passed = 0
     fail = 0
     skip = 0
@@ -111,6 +115,7 @@ def run_module(mod):
             skip += 1
             continue
         try:
+            _reset_mp_globals()
             fn()
             passed += 1
         except BaseException as e:
@@ -167,7 +172,7 @@ let MODULES = only ? ALL_MODULES.filter(m => m === only)
 /* ?dash=2 holds the modules that need several minutes each; 1 holds the rest.
    LAST above only orders, SLOW here splits: test_calculus is ordered last but
    stays on 1, its 160 s being the most a page can carry without hurting. */
-const SLOW = ['mpmath.tests.test_quad', 'mpmath.tests.test_convert'];
+const SLOW = ['mpmath.tests.test_convert'];
 const dash = params.get('dash');
 if (dash === '1')      MODULES = MODULES.filter(m => !SLOW.includes(m));
 else if (dash === '2') MODULES = MODULES.filter(m =>  SLOW.includes(m));
